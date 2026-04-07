@@ -39,6 +39,7 @@ with redirect_stdout(io.StringIO()):
         PrimaryPushButton,
         PushButton,
         PushSettingCard,
+        SegmentedWidget,
         SettingCardGroup,
         SingleDirectionScrollArea,
         StrongBodyLabel,
@@ -347,13 +348,10 @@ class BaseQueryPage(QWidget):
         self.time_label = CaptionLabel("最近成功: -", result_card)
         result_header.addWidget(self.time_label)
 
-        self.summary_toggle = PushButton("卡片", result_card)
-        self.summary_toggle.clicked.connect(lambda: self._show_result_mode("summary"))
-        result_header.addWidget(self.summary_toggle)
-
-        self.raw_toggle = PushButton("原始 JSON", result_card)
-        self.raw_toggle.clicked.connect(lambda: self._show_result_mode("raw"))
-        result_header.addWidget(self.raw_toggle)
+        self.result_mode_switch = SegmentedWidget(result_card)
+        self.result_mode_switch.addItem("summary", "结果卡片", lambda: self._show_result_mode("summary"))
+        self.result_mode_switch.addItem("raw", "原始请求", lambda: self._show_result_mode("raw"))
+        result_header.addWidget(self.result_mode_switch)
 
         result_layout.addLayout(result_header)
 
@@ -542,8 +540,7 @@ class BaseQueryPage(QWidget):
         showing_summary = mode == "summary"
         self.summary_container.setVisible(showing_summary)
         self.result_output.setVisible(not showing_summary)
-        self.summary_toggle.setEnabled(not showing_summary)
-        self.raw_toggle.setEnabled(showing_summary)
+        self.result_mode_switch.setCurrentItem(mode)
 
     def _render_summary_placeholder(self, message: str = "等待查询") -> None:
         self.hero_card.set_content("状态", message, "查询成功后会在这里显示关键结果")
@@ -929,13 +926,10 @@ class CachePage(QWidget):
         self.refresh_button.clicked.connect(self.refresh_view)
         header.addWidget(self.refresh_button)
 
-        self.data_toggle = PushButton("解析数据", content_card)
-        self.data_toggle.clicked.connect(lambda: self._show_mode("data"))
-        header.addWidget(self.data_toggle)
-
-        self.file_toggle = PushButton("原始文件", content_card)
-        self.file_toggle.clicked.connect(lambda: self._show_mode("file"))
-        header.addWidget(self.file_toggle)
+        self.content_mode_switch = SegmentedWidget(content_card)
+        self.content_mode_switch.addItem("data", "解析数据", lambda: self._show_mode("data"))
+        self.content_mode_switch.addItem("file", "原始文件", lambda: self._show_mode("file"))
+        header.addWidget(self.content_mode_switch)
 
         content_layout.addLayout(header)
 
@@ -1029,10 +1023,9 @@ class CachePage(QWidget):
     def _show_mode(self, mode: str) -> None:
         self._mode = mode
         showing_data = mode == "data"
-        self.data_toggle.setEnabled(not showing_data)
-        self.file_toggle.setEnabled(showing_data)
         self.parsed_container.setVisible(showing_data)
         self.content_output.setVisible(not showing_data)
+        self.content_mode_switch.setCurrentItem(mode)
 
     def _display_config_key(self, key: str) -> str:
         mapping = {

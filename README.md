@@ -2,6 +2,8 @@
 
 一个基于 [uv](https://docs.astral.sh/uv/)、[PySide6-Fluent-Widgets](https://qfluentwidgets.com/) 和 [OpenRouter](https://openrouter.ai/) 的桌面查询工具，用于查看 API Key 配额、账户余额和本地配置。
 
+![OpenRouter Key Viewer 截图](assets/screenshots/app-overview.png)
+
 ## 功能
 
 - 查询能力

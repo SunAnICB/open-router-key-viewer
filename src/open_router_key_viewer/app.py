@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from PySide6.QtCore import QThread, QTimer, Qt, Signal
+from PySide6.QtCore import QThread, QTimer, Qt, Signal, qVersion
 from PySide6.QtGui import QCloseEvent, QFont, QIcon
 from PySide6.QtWidgets import (
     QApplication,
@@ -32,15 +32,13 @@ with redirect_stdout(io.StringIO()):
         FluentWindow,
         InfoBar,
         InfoBarPosition,
+        HyperlinkButton,
         MessageBox,
         LineEdit,
         PasswordLineEdit,
-        PrimaryPushSettingCard,
         PrimaryPushButton,
         PushButton,
-        PushSettingCard,
         SegmentedWidget,
-        SettingCardGroup,
         SingleDirectionScrollArea,
         StrongBodyLabel,
         SwitchButton,
@@ -49,10 +47,16 @@ with redirect_stdout(io.StringIO()):
         setThemeColor,
     )
 
+from open_router_key_viewer import __version__
 from open_router_key_viewer.services.config_store import ConfigStore
 from open_router_key_viewer.services.openrouter import OpenRouterAPIError, OpenRouterClient
 
 APP_DISPLAY_NAME = "OpenRouter Key Viewer"
+APP_AUTHOR = "SunAnICB"
+APP_AUTHOR_URL = "https://github.com/SunAnICB"
+APP_REPOSITORY_URL = "https://github.com/SunAnICB/open-router-key-viewer"
+APP_LICENSE_NAME = "MIT"
+APP_DATA_SOURCE_URL = "https://openrouter.ai/docs/api-reference/overview"
 
 
 class QueryWorker(QThread):
@@ -171,14 +175,15 @@ class DetailCard(ElevatedCardWidget):
         self.title_label = StrongBodyLabel(title, self)
         self.layout_.addWidget(self.title_label)
 
-    def set_rows(self, rows: list[tuple[str, str, str]]) -> None:
+    def set_rows(self, rows: list[tuple[str, ...]]) -> None:
         while self.layout_.count() > 1:
             item = self.layout_.takeAt(1)
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
 
-        for label, value, note in rows:
+        for row_data in rows:
+            label, value, note, link = self._normalize_row(row_data)
             row = QWidget(self)
             row_layout = QVBoxLayout(row)
             row_layout.setContentsMargins(0, 10, 0, 10)
@@ -192,8 +197,14 @@ class DetailCard(ElevatedCardWidget):
             label_widget.setMinimumWidth(96)
             top_row.addWidget(label_widget)
 
-            value_widget = StrongBodyLabel(value, row)
-            value_widget.setMinimumWidth(120)
+            if link:
+                value_widget = HyperlinkButton(row)
+                value_widget.setText(value)
+                value_widget.setUrl(link)
+                value_widget.setMinimumWidth(120)
+            else:
+                value_widget = StrongBodyLabel(value, row)
+                value_widget.setMinimumWidth(120)
             top_row.addWidget(value_widget)
 
             if note:
@@ -208,6 +219,15 @@ class DetailCard(ElevatedCardWidget):
             row_layout.addLayout(top_row)
             self.layout_.addWidget(row)
         self.layout_.addStretch(1)
+
+    def _normalize_row(self, row_data: tuple[str, ...]) -> tuple[str, str, str, str]:
+        if len(row_data) == 3:
+            label, value, note = row_data
+            return label, value, note, ""
+        if len(row_data) == 4:
+            label, value, note, link = row_data
+            return label, value, note, link
+        raise ValueError(f"Unsupported row data: {row_data!r}")
 
 
 class StatusBadge(QWidget):
@@ -665,7 +685,7 @@ class CreditsPage(BaseQueryPage):
     input_label = "OpenRouter Management Key"
     input_placeholder = "输入 Management Key"
     button_text = "查询余额"
-    button_icon = FluentIcon.INFO
+    button_icon = FluentIcon.SEARCH
     mode = "credits"
     missing_secret_message = "请输入 OpenRouter Management Key"
     config_key = "management_key"
@@ -1236,6 +1256,87 @@ class CachePage(QWidget):
         return bool(box.exec())
 
 
+class AboutPage(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("about-page")
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        scroll_area = SingleDirectionScrollArea(self, Qt.Vertical)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.enableTransparentBackground()
+        outer.addWidget(scroll_area)
+
+        content = QWidget(scroll_area)
+        scroll_area.setWidget(content)
+
+        root = QVBoxLayout(content)
+        root.setContentsMargins(36, 28, 36, 36)
+        root.setSpacing(18)
+
+        root.addWidget(TitleLabel("关于", self))
+
+        hero_card = ElevatedCardWidget(self)
+        hero_layout = QVBoxLayout(hero_card)
+        hero_layout.setContentsMargins(24, 22, 24, 22)
+        hero_layout.setSpacing(8)
+        hero_layout.addWidget(StrongBodyLabel(APP_DISPLAY_NAME, hero_card))
+        hero_layout.addWidget(TitleLabel(f"v{__version__}", hero_card))
+
+        description = BodyLabel("用于查询 OpenRouter API Key 配额和 OpenRouter Management Key 账户余额。", hero_card)
+        description.setWordWrap(True)
+        hero_layout.addWidget(description)
+        root.addWidget(hero_card)
+
+        details_card = DetailCard("版本信息", self)
+        details_card.set_rows(
+            [
+                ("应用名称", APP_DISPLAY_NAME, ""),
+                ("当前版本", __version__, ""),
+                ("作者", APP_AUTHOR, "", APP_AUTHOR_URL),
+                ("Python", sys.version.split()[0], ""),
+                ("Qt", qVersion(), ""),
+                ("许可证", APP_LICENSE_NAME, ""),
+                ("构建时间", self._build_time_text(), ""),
+            ]
+        )
+        root.addWidget(details_card)
+
+        notes_card = DetailCard("项目", self)
+        notes_card.set_rows(
+            [
+                ("仓库地址", "GitHub Repository", "", APP_REPOSITORY_URL),
+                (
+                    "配置位置",
+                    str(Path.home() / ".config" / "open-router-key-viewer" / "config.json"),
+                    "",
+                    (Path.home() / ".config" / "open-router-key-viewer" / "config.json").as_uri(),
+                ),
+                ("数据来源", "OpenRouter API Reference", "", APP_DATA_SOURCE_URL),
+            ]
+        )
+        root.addWidget(notes_card)
+
+    def _build_time_text(self) -> str:
+        candidates = [
+            Path(sys.executable),
+            Path(__file__),
+        ]
+        for path in candidates:
+            try:
+                if path.exists():
+                    return datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            except OSError:
+                continue
+        return "-"
+
+
 class MainWindow(FluentWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -1259,9 +1360,11 @@ class MainWindow(FluentWindow):
             self,
         )
         self.cache_page = CachePage(self.config_store, self.refresh_cache_views, self)
-        self.addSubInterface(self.key_info_page, FluentIcon.SEARCH, "Key 配额")
-        self.addSubInterface(self.credits_page, FluentIcon.INFO, "账户余额")
-        self.addSubInterface(self.cache_page, FluentIcon.FOLDER, "配置")
+        self.about_page = AboutPage(self)
+        self.addSubInterface(self.key_info_page, FluentIcon.CERTIFICATE, "Key 配额")
+        self.addSubInterface(self.credits_page, FluentIcon.PIE_SINGLE, "账户余额")
+        self.addSubInterface(self.cache_page, FluentIcon.SETTING, "配置")
+        self.addSubInterface(self.about_page, FluentIcon.INFO, "关于")
         self.navigationInterface.setReturnButtonVisible(False)
         self.resize(960, 640)
         self.setWindowTitle(APP_DISPLAY_NAME)
@@ -1477,6 +1580,8 @@ def main() -> int:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(sys.argv)
+    app.setApplicationName(APP_DISPLAY_NAME)
+    app.setApplicationVersion(__version__)
     setThemeColor("#0F6CBD")
 
     window = MainWindow()

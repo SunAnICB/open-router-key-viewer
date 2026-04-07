@@ -124,3 +124,7 @@ dist/open-router-key-viewer
 ```bash
 ./scripts/release.sh
 ```
+
+## License
+
+MIT

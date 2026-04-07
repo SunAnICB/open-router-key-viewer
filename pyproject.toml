@@ -4,6 +4,10 @@ version = "0.1.0"
 description = "Desktop viewer for OpenRouter key quota and account credits."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    { name = "SunAnICB" },
+]
 dependencies = [
     "pyside6-fluent-widgets>=1.11.2",
 ]

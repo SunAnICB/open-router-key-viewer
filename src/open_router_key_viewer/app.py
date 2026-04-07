@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QThread, QTimer, Qt, Signal, qVersion
-from PySide6.QtGui import QCloseEvent, QFont, QIcon
+from PySide6.QtGui import QCloseEvent, QFont, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -803,65 +803,39 @@ class CachePage(QWidget):
 
         summary_layout.addWidget(self.dir_exists_card, 0, 0)
         summary_layout.addWidget(self.config_exists_card, 0, 1)
-        summary_layout.addWidget(self.entry_count_card, 1, 0)
-        summary_layout.addWidget(self.file_count_card, 1, 1)
+        summary_layout.addWidget(self.file_count_card, 1, 0)
+        summary_layout.addWidget(self.entry_count_card, 1, 1)
         root.addWidget(summary_card)
 
         auto_query_card = ElevatedCardWidget(self)
         auto_query_layout = QVBoxLayout(auto_query_card)
         auto_query_layout.setContentsMargins(24, 22, 24, 22)
         auto_query_layout.setSpacing(12)
-        auto_query_layout.addWidget(StrongBodyLabel("启动行为", auto_query_card))
+        auto_query_layout.addWidget(StrongBodyLabel("自动查询", auto_query_card))
 
-        self.auto_key_row = self._create_switch_row(
-            "启动时自动查询 Key 配额",
+        auto_query_hint = CaptionLabel("每个对象在同一行设置启动时查询、定时查询和查询间隔。", auto_query_card)
+        auto_query_layout.addWidget(auto_query_hint)
+
+        self.auto_key_row = self._create_auto_query_row(
+            "Key 配额",
             "auto_query_key_info",
+            "poll_key_info_enabled",
+            "poll_key_info_interval_seconds",
+            "300",
             auto_query_card,
         )
         auto_query_layout.addWidget(self.auto_key_row)
 
-        self.auto_credits_row = self._create_switch_row(
-            "启动时自动查询账户余额",
+        self.auto_credits_row = self._create_auto_query_row(
+            "账户余额",
             "auto_query_credits",
+            "poll_credits_enabled",
+            "poll_credits_interval_seconds",
+            "300",
             auto_query_card,
         )
         auto_query_layout.addWidget(self.auto_credits_row)
         root.addWidget(auto_query_card)
-
-        polling_card = ElevatedCardWidget(self)
-        polling_layout = QVBoxLayout(polling_card)
-        polling_layout.setContentsMargins(24, 22, 24, 22)
-        polling_layout.setSpacing(12)
-        polling_layout.addWidget(StrongBodyLabel("定时查询", polling_card))
-
-        self.poll_key_switch_row = self._create_switch_row(
-            "启用 Key 配额定时查询",
-            "poll_key_info_enabled",
-            polling_card,
-        )
-        polling_layout.addWidget(self.poll_key_switch_row)
-        self.poll_key_interval_row = self._create_input_row(
-            "Key 配额间隔（秒）",
-            "poll_key_info_interval_seconds",
-            "300",
-            polling_card,
-        )
-        polling_layout.addWidget(self.poll_key_interval_row)
-
-        self.poll_credits_switch_row = self._create_switch_row(
-            "启用账户余额定时查询",
-            "poll_credits_enabled",
-            polling_card,
-        )
-        polling_layout.addWidget(self.poll_credits_switch_row)
-        self.poll_credits_interval_row = self._create_input_row(
-            "账户余额间隔（秒）",
-            "poll_credits_interval_seconds",
-            "300",
-            polling_card,
-        )
-        polling_layout.addWidget(self.poll_credits_interval_row)
-        root.addWidget(polling_card)
 
         alerts_card = ElevatedCardWidget(self)
         alerts_layout = QVBoxLayout(alerts_card)
@@ -1026,12 +1000,20 @@ class CachePage(QWidget):
         self.status_label.setText(
             "已解析本地缓存" if snapshot["config_exists"] else "未找到配置文件"
         )
-        self._sync_switch_state(self.auto_key_row, bool(payload.get("auto_query_key_info", False)))
-        self._sync_switch_state(self.auto_credits_row, bool(payload.get("auto_query_credits", False)))
+        self._sync_auto_query_row(
+            self.auto_key_row,
+            bool(payload.get("auto_query_key_info", False)),
+            bool(payload.get("poll_key_info_enabled", False)),
+            payload.get("poll_key_info_interval_seconds", 300),
+        )
+        self._sync_auto_query_row(
+            self.auto_credits_row,
+            bool(payload.get("auto_query_credits", False)),
+            bool(payload.get("poll_credits_enabled", False)),
+            payload.get("poll_credits_interval_seconds", 300),
+        )
         self._sync_switch_state(self.notify_in_app_row, bool(payload.get("notify_in_app", True)))
         self._sync_switch_state(self.notify_system_row, bool(payload.get("notify_system", True)))
-        self._sync_switch_state(self.poll_key_switch_row, bool(payload.get("poll_key_info_enabled", False)))
-        self._sync_switch_state(self.poll_credits_switch_row, bool(payload.get("poll_credits_enabled", False)))
         self._sync_switch_state(
             self.webhook_key_switch_row,
             bool(payload.get("notify_webhook_key_info_enabled", False)),
@@ -1049,8 +1031,6 @@ class CachePage(QWidget):
             bool(payload.get("notify_webhook_credits_only_critical", True)),
         )
 
-        self._sync_input_row(self.poll_key_interval_row, payload.get("poll_key_info_interval_seconds", 300))
-        self._sync_input_row(self.poll_credits_interval_row, payload.get("poll_credits_interval_seconds", 300))
         self._sync_input_row(self.key_warning_row, payload.get("key_info_warning_threshold", 5.0))
         self._sync_input_row(self.key_critical_row, payload.get("key_info_critical_threshold", 1.0))
         self._sync_input_row(self.credits_warning_row, payload.get("credits_warning_threshold", 10.0))
@@ -1158,6 +1138,61 @@ class CachePage(QWidget):
         row._switch = switch  # type: ignore[attr-defined]
         return row
 
+    def _create_auto_query_row(
+        self,
+        title: str,
+        auto_query_key: str,
+        poll_key: str,
+        interval_key: str,
+        placeholder: str,
+        parent: QWidget,
+    ) -> QWidget:
+        row = QWidget(parent)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        title_label = StrongBodyLabel(title, row)
+        title_label.setMinimumWidth(96)
+        layout.addWidget(title_label)
+
+        auto_label = CaptionLabel("启动时查询", row)
+        layout.addWidget(auto_label)
+
+        auto_switch = SwitchButton(row)
+        auto_switch.checkedChanged.connect(
+            lambda checked, key=auto_query_key, button=auto_switch: self._toggle_auto_query(key, button, checked)
+        )
+        layout.addWidget(auto_switch)
+
+        poll_label = CaptionLabel("定时查询", row)
+        layout.addWidget(poll_label)
+
+        poll_switch = SwitchButton(row)
+        poll_switch.checkedChanged.connect(
+            lambda checked, key=poll_key, button=poll_switch: self._toggle_auto_query(key, button, checked)
+        )
+        layout.addWidget(poll_switch)
+
+        interval_label = CaptionLabel("查询间隔（秒）", row)
+        layout.addWidget(interval_label)
+
+        interval_input = LineEdit(row)
+        interval_input.setPlaceholderText(placeholder)
+        interval_input.setFixedWidth(120)
+        interval_input.editingFinished.connect(
+            lambda key=interval_key, line_edit=interval_input: self._save_input_value(
+                key, line_edit.text().strip(), placeholder
+            )
+        )
+        layout.addWidget(interval_input)
+        layout.addStretch(1)
+
+        row._auto_switch = auto_switch  # type: ignore[attr-defined]
+        row._poll_switch = poll_switch  # type: ignore[attr-defined]
+        row._line_edit = interval_input  # type: ignore[attr-defined]
+        return row
+
     def _create_input_row(self, text: str, config_key: str, placeholder: str, parent: QWidget) -> QWidget:
         row = QWidget(parent)
         layout = QHBoxLayout(row)
@@ -1192,6 +1227,27 @@ class CachePage(QWidget):
         button.setChecked(checked)
         button.blockSignals(False)
         self._sync_switch_button(button, checked)
+
+    def _sync_auto_query_row(
+        self,
+        row: QWidget,
+        auto_checked: bool,
+        poll_checked: bool,
+        interval_value: object,
+    ) -> None:
+        auto_switch = row._auto_switch  # type: ignore[attr-defined]
+        poll_switch = row._poll_switch  # type: ignore[attr-defined]
+        line_edit = row._line_edit  # type: ignore[attr-defined]
+
+        for button, checked in ((auto_switch, auto_checked), (poll_switch, poll_checked)):
+            button.blockSignals(True)
+            button.setChecked(checked)
+            button.blockSignals(False)
+            self._sync_switch_button(button, checked)
+
+        line_edit.blockSignals(True)
+        line_edit.setText("" if interval_value is None else str(interval_value))
+        line_edit.blockSignals(False)
 
     def _sync_switch_button(self, button: SwitchButton, checked: bool) -> None:
         button.setOnText("开启")
@@ -1229,7 +1285,9 @@ class CachePage(QWidget):
 
     def _sync_input_row(self, row: QWidget, value: object) -> None:
         line_edit = row._line_edit  # type: ignore[attr-defined]
+        line_edit.blockSignals(True)
         line_edit.setText("" if value is None else str(value))
+        line_edit.blockSignals(False)
 
     def _show_error(self, message: str) -> None:
         InfoBar.error(
@@ -1383,8 +1441,8 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self.cache_page, FluentIcon.SETTING, "配置")
         self.addSubInterface(self.about_page, FluentIcon.INFO, "关于")
         self.navigationInterface.setReturnButtonVisible(False)
-        self.resize(960, 640)
         self.setWindowTitle(APP_DISPLAY_NAME)
+        self._apply_initial_geometry()
         self._setup_tray_icon()
         QTimer.singleShot(0, self._run_startup_queries)
 
@@ -1393,6 +1451,23 @@ class MainWindow(FluentWindow):
         self.credits_page.load_cached_secret()
         self.cache_page.refresh_view()
         self._apply_polling_settings()
+
+    def _apply_initial_geometry(self) -> None:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            self.resize(960, 640)
+            return
+
+        available = screen.availableGeometry()
+        width = max(800, int(available.width() * 0.8))
+        height = max(560, int(available.height() * 0.8))
+        width = min(width, available.width())
+        height = min(height, available.height())
+        self.resize(width, height)
+
+        x = available.x() + (available.width() - width) // 2
+        y = available.y() + (available.height() - height) // 2
+        self.move(x, y)
 
     def _run_startup_queries(self) -> None:
         payload = self.config_store.load() or {}

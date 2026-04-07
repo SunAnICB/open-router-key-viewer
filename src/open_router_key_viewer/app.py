@@ -1419,9 +1419,14 @@ class MainWindow(FluentWindow):
         self._tray_icon = tray_icon
 
     def _load_app_icon(self) -> QIcon:
+        base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
         candidates = [
-            Path(__file__).resolve().parents[2] / "assets" / "open-router-key-viewer.svg",
+            base_dir / "assets" / "open-router-key-viewer.png",
+            base_dir / "assets" / "open-router-key-viewer.svg",
+            Path(sys.argv[0]).resolve().parent / "assets" / "open-router-key-viewer.png",
             Path(sys.argv[0]).resolve().parent / "assets" / "open-router-key-viewer.svg",
+            Path.cwd() / "assets" / "open-router-key-viewer.png",
+            Path.cwd() / "assets" / "open-router-key-viewer.svg",
         ]
         for path in candidates:
             if path.exists():

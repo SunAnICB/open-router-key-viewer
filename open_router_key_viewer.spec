@@ -1,9 +1,14 @@
+import io
+from contextlib import redirect_stdout
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
-datas = collect_data_files("qfluentwidgets")
+with redirect_stdout(io.StringIO()):
+    datas = collect_data_files("qfluentwidgets")
+    hiddenimports = collect_submodules("qfluentwidgets")
+
 datas += [("assets/open-router-key-viewer.svg", "assets")]
-hiddenimports = collect_submodules("qfluentwidgets")
 
 
 a = Analysis(
@@ -34,6 +39,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
+    icon="build/icons/open-router-key-viewer.ico",
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

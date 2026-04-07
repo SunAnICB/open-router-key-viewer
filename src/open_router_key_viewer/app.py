@@ -106,6 +106,30 @@ class MetricCard(ElevatedCardWidget):
         self.note_label.setText(note)
 
 
+class ClickablePathLabel(CaptionLabel):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setText("")
+        self.setWordWrap(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("点击复制路径")
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        path_text = self.text().strip()
+        if path_text and path_text != "-":
+            QApplication.clipboard().setText(path_text)
+            InfoBar.success(
+                title="已复制路径",
+                content=path_text,
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=1500,
+                parent=self.window(),
+            )
+        super().mousePressEvent(event)
+
+
 class PathActionCard(ElevatedCardWidget):
     def __init__(
         self,
@@ -124,8 +148,7 @@ class PathActionCard(ElevatedCardWidget):
         self.value_label = TitleLabel("-", self)
         self.note_label = BodyLabel("", self)
         self.note_label.setWordWrap(True)
-        self.path_label = CaptionLabel("", self)
-        self.path_label.setWordWrap(True)
+        self.path_label = ClickablePathLabel(self)
 
         self.button = PushButton(button_text, self)
         self.button.setIcon(button_icon)
@@ -1312,12 +1335,6 @@ class AboutPage(QWidget):
         notes_card.set_rows(
             [
                 ("仓库地址", "GitHub Repository", "", APP_REPOSITORY_URL),
-                (
-                    "配置位置",
-                    str(Path.home() / ".config" / "open-router-key-viewer" / "config.json"),
-                    "",
-                    (Path.home() / ".config" / "open-router-key-viewer" / "config.json").as_uri(),
-                ),
                 ("数据来源", "OpenRouter API Reference", "", APP_DATA_SOURCE_URL),
             ]
         )

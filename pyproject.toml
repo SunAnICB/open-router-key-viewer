@@ -1,0 +1,21 @@
+[project]
+name = "open-router-key-viewer"
+version = "0.1.0"
+description = "Desktop viewer for OpenRouter key quota and account credits."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pyside6-fluent-widgets>=1.11.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.19.0",
+]

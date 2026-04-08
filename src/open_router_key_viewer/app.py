@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QSizePolicy,
     QStyle,
     QSystemTrayIcon,
     QVBoxLayout,
@@ -43,6 +44,7 @@ with redirect_stdout(io.StringIO()):
         StrongBodyLabel,
         SwitchButton,
         TextEdit,
+        TransparentToolButton,
         TitleLabel,
         setThemeColor,
     )
@@ -57,6 +59,25 @@ APP_AUTHOR_URL = "https://github.com/SunAnICB"
 APP_REPOSITORY_URL = "https://github.com/SunAnICB/open-router-key-viewer"
 APP_LICENSE_NAME = "MIT"
 APP_DATA_SOURCE_URL = "https://openrouter.ai/docs/api-reference/overview"
+DISPLAY_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def format_currency_value(value: object) -> str:
+    if isinstance(value, (int, float)):
+        return f"${value:.4f}"
+    return "-"
+
+
+def show_error_bar(parent: QWidget, title: str, message: str) -> None:
+    InfoBar.error(
+        title=title,
+        content=message,
+        orient=Qt.Orientation.Horizontal,
+        isClosable=True,
+        position=InfoBarPosition.TOP_RIGHT,
+        duration=3000,
+        parent=parent,
+    )
 
 
 class QueryWorker(QThread):
@@ -281,6 +302,146 @@ class StatusBadge(QWidget):
             "}"
             f"QLabel {{ color: {text}; background: transparent; }}"
         )
+
+
+class FloatingMetricCard(ElevatedCardWidget):
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 7, 8, 7)
+        layout.setSpacing(4)
+
+        self.title_label = CaptionLabel(title, self)
+        self.value_label = StrongBodyLabel("-", self)
+        self.time_label = CaptionLabel("-", self)
+
+        self.title_label.setFixedWidth(52)
+        self.value_label.setMinimumWidth(54)
+        self.value_label.setMaximumWidth(84)
+        self.value_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.time_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.value_label)
+        layout.addSpacing(6)
+        layout.addWidget(self.time_label)
+
+    def set_content(self, value: str, refreshed_at: str) -> None:
+        self.value_label.setText(value)
+        self.time_label.setText(self._format_refresh_time(refreshed_at))
+
+    def _format_refresh_time(self, refreshed_at: str) -> str:
+        if refreshed_at in {"", "-"}:
+            return "-"
+        return refreshed_at
+
+
+class FloatingWindow(QWidget):
+    refresh_requested = Signal()
+    full_window_requested = Signal()
+    closed = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._topmost_enabled = True
+        self._allow_close = False
+        self._build_ui()
+        self._apply_window_flags(initial=True)
+
+    def _build_ui(self) -> None:
+        self.setWindowTitle(APP_DISPLAY_NAME)
+        self.resize(292, 106)
+        self.setMinimumSize(280, 102)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(5, 4, 5, 5)
+        root.setSpacing(2)
+
+        header = QWidget(self)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(2, 2, 2, 2)
+        header_layout.setSpacing(3)
+
+        self.refresh_button = PrimaryPushButton("刷新", header)
+        self.refresh_button.setIcon(FluentIcon.SYNC)
+        self.refresh_button.setMinimumWidth(56)
+        self.refresh_button.clicked.connect(self.refresh_requested.emit)
+        header_layout.addWidget(self.refresh_button)
+
+        self.topmost_button = TransparentToolButton(header)
+        self.topmost_button.setFixedSize(30, 30)
+        self.topmost_button.clicked.connect(self._toggle_topmost)
+        header_layout.addStretch(1)
+
+        header_layout.addWidget(self.topmost_button)
+
+        self.full_window_button = PushButton("主窗口", header)
+        self.full_window_button.setIcon(FluentIcon.HOME)
+        self.full_window_button.setMinimumWidth(56)
+        self.full_window_button.clicked.connect(self.full_window_requested.emit)
+        header_layout.addWidget(self.full_window_button)
+
+        root.addWidget(header)
+
+        self.key_card = FloatingMetricCard("剩余配额", self)
+        self.credits_card = FloatingMetricCard("账户余额", self)
+        root.addWidget(self.key_card)
+        root.addWidget(self.credits_card)
+        self._refresh_topmost_button()
+
+    def _toggle_topmost(self) -> None:
+        self._topmost_enabled = not self._topmost_enabled
+        self._refresh_topmost_button()
+        self._apply_window_flags()
+
+    def _refresh_topmost_button(self) -> None:
+        icon = FluentIcon.PIN if self._topmost_enabled else FluentIcon.UNPIN
+        tip = "取消置顶" if self._topmost_enabled else "置顶"
+        self.topmost_button.setIcon(icon)
+        self.topmost_button.setToolTip(tip)
+
+    def _apply_window_flags(self, initial: bool = False) -> None:
+        if initial:
+            flags = Qt.WindowType.Window | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint
+            flags |= Qt.WindowType.WindowCloseButtonHint | Qt.WindowType.WindowMinMaxButtonsHint
+            if self._topmost_enabled:
+                flags |= Qt.WindowType.WindowStaysOnTopHint
+            self.setWindowFlags(flags)
+            return
+
+        was_visible = self.isVisible()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self._topmost_enabled)
+        if was_visible:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+    def set_topmost(self, enabled: bool) -> None:
+        self._topmost_enabled = enabled
+        self._refresh_topmost_button()
+        self._apply_window_flags()
+
+    def update_metrics(
+        self,
+        key_value: str,
+        key_time: str,
+        credits_value: str,
+        credits_time: str,
+    ) -> None:
+        self.key_card.set_content(key_value, key_time)
+        self.credits_card.set_content(credits_value, credits_time)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._allow_close:
+            super().closeEvent(event)
+            return
+        self.closed.emit()
+        event.ignore()
+
+    def close_for_shutdown(self) -> None:
+        self._allow_close = True
+        self.close()
+
 
 
 class BaseQueryPage(QWidget):
@@ -522,7 +683,7 @@ class BaseQueryPage(QWidget):
         self._worker.start()
 
     def _handle_success(self, payload: dict) -> None:
-        self._last_success_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._last_success_time = datetime.now().strftime(DISPLAY_DATETIME_FORMAT)
         self.time_label.setText(f"最近成功: {self._last_success_time}")
         self.status_badge.set_status("success", "查询成功")
         self._summary_payload = payload.get("summary", {})
@@ -569,15 +730,7 @@ class BaseQueryPage(QWidget):
         self._worker = None
 
     def _show_error(self, message: str) -> None:
-        InfoBar.error(
-            title="请求失败",
-            content=message,
-            orient=Qt.Orientation.Horizontal,
-            isClosable=True,
-            position=InfoBarPosition.TOP_RIGHT,
-            duration=3000,
-            parent=self.window(),
-        )
+        show_error_bar(self.window(), "请求失败", message)
 
     def _show_result_mode(self, mode: str) -> None:
         showing_summary = mode == "summary"
@@ -615,6 +768,15 @@ class BaseQueryPage(QWidget):
         if self._worker and self._worker.isRunning():
             return
         self._run_query(self.mode, secret)
+
+    def run_query_if_possible(self) -> None:
+        self.auto_query_if_possible()
+
+    def latest_success_time(self) -> str:
+        return self._last_success_time
+
+    def _display_amount(self, value: object) -> str:
+        return format_currency_value(value)
 
     def stop_worker(self) -> None:
         if self._worker and self._worker.isRunning():
@@ -673,11 +835,6 @@ class KeyInfoPage(BaseQueryPage):
             ],
         )
 
-    def _display_amount(self, value: object) -> str:
-        if isinstance(value, (int, float)):
-            return f"${value:.4f}"
-        return "-"
-
     def _display_value(self, value: object) -> str:
         if value is None:
             return "-"
@@ -700,7 +857,7 @@ class KeyInfoPage(BaseQueryPage):
         except ValueError:
             return value.strip()
 
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
+        return dt.strftime(DISPLAY_DATETIME_FORMAT)
 
 
 class CreditsPage(BaseQueryPage):
@@ -738,23 +895,21 @@ class CreditsPage(BaseQueryPage):
             ],
         )
 
-    def _display_amount(self, value: object) -> str:
-        if isinstance(value, (int, float)):
-            return f"${value:.4f}"
-        return "-"
-
-
 class CachePage(QWidget):
     def __init__(
         self,
         config_store: ConfigStore,
         on_cache_changed: Callable[[], None],
+        on_open_floating_window: Callable[[], None],
+        floating_window_supported: bool,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("cache-page")
         self.config_store = config_store
         self.on_cache_changed = on_cache_changed
+        self.on_open_floating_window = on_open_floating_window
+        self.floating_window_supported = floating_window_supported
         self._build_ui()
         self.refresh_view()
 
@@ -806,6 +961,31 @@ class CachePage(QWidget):
         summary_layout.addWidget(self.file_count_card, 1, 0)
         summary_layout.addWidget(self.entry_count_card, 1, 1)
         root.addWidget(summary_card)
+
+        floating_card = ElevatedCardWidget(self)
+        floating_layout = QHBoxLayout(floating_card)
+        floating_layout.setContentsMargins(24, 22, 24, 22)
+        floating_layout.setSpacing(12)
+        floating_text = QVBoxLayout()
+        floating_text.setContentsMargins(0, 0, 0, 0)
+        floating_text.setSpacing(4)
+        floating_text.addWidget(StrongBodyLabel("悬浮小窗", floating_card))
+        floating_hint_text = (
+            "切换到仅显示剩余配额和账户余额的顶层小窗。"
+            if self.floating_window_supported
+            else "当前仅在 X11/xcb 启动时支持悬浮小窗。"
+        )
+        floating_hint = CaptionLabel(floating_hint_text, floating_card)
+        floating_hint.setWordWrap(True)
+        floating_text.addWidget(floating_hint)
+        floating_layout.addLayout(floating_text, 1)
+
+        self.open_floating_button = PrimaryPushButton("打开悬浮小窗", floating_card)
+        self.open_floating_button.setIcon(FluentIcon.OPEN_PANE if hasattr(FluentIcon, "OPEN_PANE") else FluentIcon.HOME)
+        self.open_floating_button.clicked.connect(self.on_open_floating_window)
+        self.open_floating_button.setEnabled(self.floating_window_supported)
+        floating_layout.addWidget(self.open_floating_button)
+        root.addWidget(floating_card)
 
         auto_query_card = ElevatedCardWidget(self)
         auto_query_layout = QVBoxLayout(auto_query_card)
@@ -1290,15 +1470,7 @@ class CachePage(QWidget):
         line_edit.blockSignals(False)
 
     def _show_error(self, message: str) -> None:
-        InfoBar.error(
-            title="配置无效",
-            content=message,
-            orient=Qt.Orientation.Horizontal,
-            isClosable=True,
-            position=InfoBarPosition.TOP_RIGHT,
-            duration=3000,
-            parent=self.window(),
-        )
+        show_error_bar(self.window(), "配置无效", message)
 
     def _delete_config_file(self) -> None:
         if not self._confirm("删除配置文件", "确认删除 config.json 吗？"):
@@ -1406,7 +1578,7 @@ class AboutPage(QWidget):
         for path in candidates:
             try:
                 if path.exists():
-                    return datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                    return datetime.fromtimestamp(path.stat().st_mtime).strftime(DISPLAY_DATETIME_FORMAT)
             except OSError:
                 continue
         return "-"
@@ -1416,8 +1588,13 @@ class MainWindow(FluentWindow):
     def __init__(self) -> None:
         super().__init__()
         self.config_store = ConfigStore()
+        self._floating_window_supported = self._is_x11_platform()
         self._alert_state = {"key-info": "normal", "credits": "normal"}
         self._tray_icon: QSystemTrayIcon | None = None
+        self._floating_key_value = "-"
+        self._floating_key_time = "-"
+        self._floating_credits_value = "-"
+        self._floating_credits_time = "-"
         self.key_timer = QTimer(self)
         self.key_timer.timeout.connect(self.key_info_page_auto_query)
         self.credits_timer = QTimer(self)
@@ -1434,8 +1611,17 @@ class MainWindow(FluentWindow):
             self.handle_query_success,
             self,
         )
-        self.cache_page = CachePage(self.config_store, self.refresh_cache_views, self)
+        self.cache_page = CachePage(
+            self.config_store,
+            self.refresh_cache_views,
+            self.show_floating_window,
+            self._floating_window_supported,
+            self,
+        )
         self.about_page = AboutPage(self)
+        self.floating_window: FloatingWindow | None = None
+        if self._floating_window_supported:
+            self.floating_window = self._create_floating_window(topmost=True)
         self.addSubInterface(self.key_info_page, FluentIcon.CERTIFICATE, "Key 配额")
         self.addSubInterface(self.credits_page, FluentIcon.PIE_SINGLE, "账户余额")
         self.addSubInterface(self.cache_page, FluentIcon.SETTING, "配置")
@@ -1444,7 +1630,12 @@ class MainWindow(FluentWindow):
         self.setWindowTitle(APP_DISPLAY_NAME)
         self._apply_initial_geometry()
         self._setup_tray_icon()
+        if self.floating_window is not None:
+            self._sync_floating_window()
         QTimer.singleShot(0, self._run_startup_queries)
+
+    def _is_x11_platform(self) -> bool:
+        return "xcb" in (QGuiApplication.platformName() or "").lower()
 
     def refresh_cache_views(self) -> None:
         self.key_info_page.load_cached_secret()
@@ -1502,11 +1693,74 @@ class MainWindow(FluentWindow):
     def credits_page_auto_query(self) -> None:
         self.credits_page.auto_query_if_possible()
 
+    def refresh_floating_metrics(self) -> None:
+        self.key_info_page.run_query_if_possible()
+        self.credits_page.run_query_if_possible()
+
+    def _create_floating_window(self, topmost: bool) -> FloatingWindow:
+        window = FloatingWindow()
+        window.set_topmost(topmost)
+        window.refresh_requested.connect(self.refresh_floating_metrics)
+        window.full_window_requested.connect(self.show_full_window)
+        window.closed.connect(self.show_full_window)
+        return window
+
+    def show_floating_window(self) -> None:
+        if self.floating_window is None:
+            InfoBar.warning(
+                title="当前不可用",
+                content="悬浮小窗仅在 X11/xcb 启动时支持",
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=2500,
+                parent=self,
+            )
+            return
+        self._sync_floating_window()
+        center = self.frameGeometry().center()
+        self.hide()
+        target_x = center.x() - self.floating_window.width() // 2
+        target_y = center.y() - self.floating_window.height() // 2
+        self.floating_window.move(target_x, target_y)
+        self.floating_window.show()
+        self.floating_window.raise_()
+        self.floating_window.activateWindow()
+
+    def show_full_window(self) -> None:
+        if self.floating_window is not None:
+            self.floating_window.hide()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
     def handle_query_success(self, mode: str, payload: dict[str, object]) -> None:
         summary = payload.get("summary", {})
         if not isinstance(summary, dict):
             return
+        self._update_floating_metrics(mode, summary)
         self._evaluate_thresholds(mode, summary)
+
+    def _update_floating_metrics(self, mode: str, summary: dict[str, object]) -> None:
+        if mode == "key-info":
+            value = summary.get("limit_remaining")
+            self._floating_key_value = format_currency_value(value)
+            self._floating_key_time = self.key_info_page.latest_success_time()
+        else:
+            value = summary.get("remaining_credits")
+            self._floating_credits_value = format_currency_value(value)
+            self._floating_credits_time = self.credits_page.latest_success_time()
+        self._sync_floating_window()
+
+    def _sync_floating_window(self) -> None:
+        if self.floating_window is None:
+            return
+        self.floating_window.update_metrics(
+            self._floating_key_value,
+            self._floating_key_time,
+            self._floating_credits_value,
+            self._floating_credits_time,
+        )
 
     def _evaluate_thresholds(self, mode: str, summary: dict[str, object]) -> None:
         payload = self.config_store.load() or {}
@@ -1644,7 +1898,7 @@ class MainWindow(FluentWindow):
             "level": level,
             "target": target,
             "current_value": value,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": datetime.now().strftime(DISPLAY_DATETIME_FORMAT),
         }
         threading.Thread(target=self._post_webhook, args=(url, body), daemon=True).start()
 
@@ -1662,6 +1916,9 @@ class MainWindow(FluentWindow):
         self.credits_timer.stop()
         self.key_info_page.stop_worker()
         self.credits_page.stop_worker()
+        if self.floating_window is not None:
+            self.floating_window.blockSignals(True)
+            self.floating_window.close_for_shutdown()
         if self._tray_icon is not None:
             self._tray_icon.hide()
         super().closeEvent(event)

@@ -10,8 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from PySide6.QtCore import QThread, QTimer, Qt, Signal, qVersion
-from PySide6.QtGui import QCloseEvent, QFont, QGuiApplication, QIcon
+from PySide6.QtCore import QPoint, QThread, QTimer, Qt, Signal, qVersion
+from PySide6.QtGui import QCloseEvent, QFont, QGuiApplication, QIcon, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -339,12 +339,14 @@ class FloatingMetricCard(ElevatedCardWidget):
 class FloatingWindow(QWidget):
     refresh_requested = Signal()
     full_window_requested = Signal()
+    topmost_changed = Signal(bool)
     closed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._topmost_enabled = True
         self._allow_close = False
+        self._drag_offset: QPoint | None = None
         self._build_ui()
         self._apply_window_flags(initial=True)
 
@@ -352,12 +354,18 @@ class FloatingWindow(QWidget):
         self.setWindowTitle(APP_DISPLAY_NAME)
         self.resize(292, 106)
         self.setMinimumSize(280, 102)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(5, 4, 5, 5)
-        root.setSpacing(2)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        header = QWidget(self)
+        shell = ElevatedCardWidget(self)
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(5, 4, 5, 5)
+        shell_layout.setSpacing(2)
+
+        header = QWidget(shell)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(2, 2, 2, 2)
         header_layout.setSpacing(3)
@@ -381,18 +389,19 @@ class FloatingWindow(QWidget):
         self.full_window_button.clicked.connect(self.full_window_requested.emit)
         header_layout.addWidget(self.full_window_button)
 
-        root.addWidget(header)
+        shell_layout.addWidget(header)
 
-        self.key_card = FloatingMetricCard("剩余配额", self)
-        self.credits_card = FloatingMetricCard("账户余额", self)
-        root.addWidget(self.key_card)
-        root.addWidget(self.credits_card)
+        self.key_card = FloatingMetricCard("剩余配额", shell)
+        self.credits_card = FloatingMetricCard("账户余额", shell)
+        shell_layout.addWidget(self.key_card)
+        shell_layout.addWidget(self.credits_card)
+        root.addWidget(shell)
         self._refresh_topmost_button()
 
     def _toggle_topmost(self) -> None:
         self._topmost_enabled = not self._topmost_enabled
         self._refresh_topmost_button()
-        self._apply_window_flags()
+        self.topmost_changed.emit(self._topmost_enabled)
 
     def _refresh_topmost_button(self) -> None:
         icon = FluentIcon.PIN if self._topmost_enabled else FluentIcon.UNPIN
@@ -402,24 +411,16 @@ class FloatingWindow(QWidget):
 
     def _apply_window_flags(self, initial: bool = False) -> None:
         if initial:
-            flags = Qt.WindowType.Window | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint
-            flags |= Qt.WindowType.WindowCloseButtonHint | Qt.WindowType.WindowMinMaxButtonsHint
+            flags = Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
             if self._topmost_enabled:
                 flags |= Qt.WindowType.WindowStaysOnTopHint
             self.setWindowFlags(flags)
             return
 
-        was_visible = self.isVisible()
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self._topmost_enabled)
-        if was_visible:
-            self.show()
-            self.raise_()
-            self.activateWindow()
-
     def set_topmost(self, enabled: bool) -> None:
         self._topmost_enabled = enabled
         self._refresh_topmost_button()
-        self._apply_window_flags()
+        self._apply_window_flags(initial=True)
 
     def update_metrics(
         self,
@@ -437,6 +438,24 @@ class FloatingWindow(QWidget):
             return
         self.closed.emit()
         event.ignore()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
 
     def close_for_shutdown(self) -> None:
         self._allow_close = True
@@ -1702,8 +1721,34 @@ class MainWindow(FluentWindow):
         window.set_topmost(topmost)
         window.refresh_requested.connect(self.refresh_floating_metrics)
         window.full_window_requested.connect(self.show_full_window)
+        window.topmost_changed.connect(self._schedule_floating_window_rebuild)
         window.closed.connect(self.show_full_window)
         return window
+
+    def _schedule_floating_window_rebuild(self, topmost: bool) -> None:
+        QTimer.singleShot(0, lambda value=topmost: self._rebuild_floating_window(value))
+
+    def _rebuild_floating_window(self, topmost: bool) -> None:
+        if self.floating_window is None:
+            return
+
+        old_window = self.floating_window
+        was_visible = old_window.isVisible()
+        geometry = old_window.geometry()
+
+        new_window = self._create_floating_window(topmost=topmost)
+        self.floating_window = new_window
+        self._sync_floating_window()
+        new_window.setGeometry(geometry)
+
+        old_window.blockSignals(True)
+        old_window.close_for_shutdown()
+        old_window.deleteLater()
+
+        if was_visible:
+            new_window.show()
+            new_window.raise_()
+            new_window.activateWindow()
 
     def show_floating_window(self) -> None:
         if self.floating_window is None:

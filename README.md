@@ -13,6 +13,10 @@
 - 本地配置
   - 支持本地保存和管理已缓存的 key 与配置
   - 启动时自动加载已有配置文件
+- 悬浮小窗
+  - 支持仅展示剩余配额、账户余额和最近刷新时间的小窗
+  - 支持小窗内手动刷新、置顶切换和返回主窗口
+  - 仅在 `X11/xcb` 启动时可用
 - 自动化与监控
   - 支持启动自动查询
   - 支持按秒配置定时自动查询
@@ -38,6 +42,18 @@ uv run python -m open_router_key_viewer
 ```bash
 ./scripts/run.sh
 ```
+
+如果需要使用悬浮小窗，请用 `X11/xcb` 方式启动：
+
+```bash
+QT_QPA_PLATFORM=xcb ./scripts/run.sh
+```
+
+当前规则：
+
+- 普通主界面可在默认方式下运行
+- 悬浮小窗仅在 `X11/xcb` 启动时支持
+- `Wayland` 下不会启用悬浮小窗
 
 ## 本地配置
 
@@ -88,6 +104,7 @@ uv run python -m open_router_key_viewer
 - 删除整个缓存目录
 - 查看已解析配置
 - 查看原始配置文件内容
+- 打开悬浮小窗（仅 `X11/xcb`）
 - 启动时自动查询 `Key 配额`
 - 启动时自动查询 `账户余额`
 - 定时查询开关和轮询间隔
@@ -107,6 +124,8 @@ uv run python -m open_router_key_viewer
 
 项目目前保留 PyInstaller `onefile` 打包方式。
 
+如果使用发布脚本，还需要系统里有 ImageMagick 的 `convert`，用于从 SVG 生成图标。
+
 直接打包：
 
 ```bash
@@ -124,6 +143,12 @@ dist/open-router-key-viewer
 ```bash
 ./scripts/release.sh
 ```
+
+脚本会：
+
+- 清理旧的 `build/` 和 `dist/`
+- 生成打包所需图标
+- 执行 `PyInstaller onefile` 打包
 
 ## License
 

@@ -53,6 +53,11 @@ from open_router_key_viewer import __version__
 from open_router_key_viewer.services.config_store import ConfigStore
 from open_router_key_viewer.services.openrouter import OpenRouterAPIError, OpenRouterClient
 
+try:
+    from open_router_key_viewer.sni_tray import SNITray
+except ImportError:
+    SNITray = None  # type: ignore[assignment,misc]
+
 APP_DISPLAY_NAME = "OpenRouter Key Viewer"
 APP_AUTHOR = "SunAnICB"
 APP_AUTHOR_URL = "https://github.com/SunAnICB"
@@ -921,6 +926,7 @@ class CachePage(QWidget):
         on_cache_changed: Callable[[], None],
         on_open_floating_window: Callable[[], None],
         floating_window_supported: bool,
+        indicator_available: bool,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -929,6 +935,7 @@ class CachePage(QWidget):
         self.on_cache_changed = on_cache_changed
         self.on_open_floating_window = on_open_floating_window
         self.floating_window_supported = floating_window_supported
+        self.indicator_available = indicator_available
         self._build_ui()
         self.refresh_view()
 
@@ -1005,6 +1012,32 @@ class CachePage(QWidget):
         self.open_floating_button.setEnabled(self.floating_window_supported)
         floating_layout.addWidget(self.open_floating_button)
         root.addWidget(floating_card)
+
+        indicator_card = ElevatedCardWidget(self)
+        indicator_layout = QHBoxLayout(indicator_card)
+        indicator_layout.setContentsMargins(24, 22, 24, 22)
+        indicator_layout.setSpacing(12)
+        indicator_text = QVBoxLayout()
+        indicator_text.setContentsMargins(0, 0, 0, 0)
+        indicator_text.setSpacing(4)
+        indicator_text.addWidget(StrongBodyLabel("顶栏指示器", indicator_card))
+        indicator_hint_text = (
+            "在 GNOME 顶栏显示滚动的配额和余额数据（Ubuntu 开箱即用，其他发行版需安装 AppIndicator 扩展）。"
+            if self.indicator_available
+            else "当前环境不支持顶栏指示器（需要 D-Bus StatusNotifierWatcher 服务）。"
+        )
+        indicator_hint = CaptionLabel(indicator_hint_text, indicator_card)
+        indicator_hint.setWordWrap(True)
+        indicator_text.addWidget(indicator_hint)
+        indicator_layout.addLayout(indicator_text, 1)
+        self.indicator_switch_row = self._create_switch_row(
+            "启用顶栏指示器",
+            "panel_indicator_enabled",
+            indicator_card,
+        )
+        self.indicator_switch_row.setEnabled(self.indicator_available)
+        indicator_layout.addWidget(self.indicator_switch_row)
+        root.addWidget(indicator_card)
 
         auto_query_card = ElevatedCardWidget(self)
         auto_query_layout = QVBoxLayout(auto_query_card)
@@ -1211,6 +1244,10 @@ class CachePage(QWidget):
             bool(payload.get("poll_credits_enabled", False)),
             payload.get("poll_credits_interval_seconds", 300),
         )
+        self._sync_switch_state(
+            self.indicator_switch_row,
+            bool(payload.get("panel_indicator_enabled", False)),
+        )
         self._sync_switch_state(self.notify_in_app_row, bool(payload.get("notify_in_app", True)))
         self._sync_switch_state(self.notify_system_row, bool(payload.get("notify_system", True)))
         self._sync_switch_state(
@@ -1259,6 +1296,7 @@ class CachePage(QWidget):
             "poll_key_info_interval_seconds": "Key 配额间隔（秒）",
             "poll_credits_enabled": "启用账户余额定时查询",
             "poll_credits_interval_seconds": "账户余额间隔（秒）",
+            "panel_indicator_enabled": "启用顶栏指示器",
             "notify_in_app": "启用应用内通知",
             "notify_system": "启用系统通知",
             "key_info_warning_threshold": "Key 配额 Warning 阈值",
@@ -1608,8 +1646,12 @@ class MainWindow(FluentWindow):
         super().__init__()
         self.config_store = ConfigStore()
         self._floating_window_supported = self._is_x11_platform()
+        self._indicator_available = self._check_indicator_available()
         self._alert_state = {"key-info": "normal", "credits": "normal"}
         self._tray_icon: QSystemTrayIcon | None = None
+        self._sni_tray: SNITray | None = None  # type: ignore[assignment]
+        self._panel_label_timer: QTimer | None = None
+        self._panel_label_phase = 0
         self._floating_key_value = "-"
         self._floating_key_time = "-"
         self._floating_credits_value = "-"
@@ -1635,6 +1677,7 @@ class MainWindow(FluentWindow):
             self.refresh_cache_views,
             self.show_floating_window,
             self._floating_window_supported,
+            self._indicator_available,
             self,
         )
         self.about_page = AboutPage(self)
@@ -1648,7 +1691,7 @@ class MainWindow(FluentWindow):
         self.navigationInterface.setReturnButtonVisible(False)
         self.setWindowTitle(APP_DISPLAY_NAME)
         self._apply_initial_geometry()
-        self._setup_tray_icon()
+        self._setup_indicator()
         if self.floating_window is not None:
             self._sync_floating_window()
         QTimer.singleShot(0, self._run_startup_queries)
@@ -1656,11 +1699,110 @@ class MainWindow(FluentWindow):
     def _is_x11_platform(self) -> bool:
         return "xcb" in (QGuiApplication.platformName() or "").lower()
 
+    @staticmethod
+    def _check_indicator_available() -> bool:
+        if SNITray is None:
+            return False
+        try:
+            from PySide6.QtDBus import QDBusConnection, QDBusInterface
+            bus = QDBusConnection.sessionBus()
+            if not bus.isConnected():
+                return False
+            watcher = QDBusInterface(
+                "org.kde.StatusNotifierWatcher",
+                "/StatusNotifierWatcher",
+                "org.kde.StatusNotifierWatcher",
+                bus,
+            )
+            return watcher.isValid()
+        except Exception:
+            return False
+
+    def _setup_indicator(self) -> None:
+        payload = self.config_store.load() or {}
+        if (
+            self._indicator_available
+            and bool(payload.get("panel_indicator_enabled"))
+        ):
+            sni = SNITray(
+                activate=self.show_full_window,
+                refresh=self.refresh_floating_metrics,
+                show_window=self.show_full_window,
+                quit=lambda: QApplication.instance().quit(),
+            )
+            if sni.register():
+                self._sni_tray = sni
+                self._start_panel_label_rotation()
+                self._set_window_icon()
+                return
+        self._setup_tray_icon()
+
+    def _set_window_icon(self) -> None:
+        icon = self._load_app_icon()
+        if icon.isNull():
+            icon = QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+        self.setWindowIcon(icon)
+        QApplication.instance().setWindowIcon(icon)
+
+    def _start_panel_label_rotation(self) -> None:
+        self._panel_label_timer = QTimer(self)
+        self._panel_label_timer.timeout.connect(self._rotate_panel_label)
+        self._panel_label_timer.start(4000)
+        self._sync_panel_label()
+
+    def _rotate_panel_label(self) -> None:
+        self._panel_label_phase = 1 - self._panel_label_phase
+        self._sync_panel_label()
+
+    def _sync_panel_label(self) -> None:
+        if self._sni_tray is None or not self._sni_tray.is_active:
+            return
+        if self._panel_label_phase == 0:
+            text = f"配额 {self._floating_key_value}"
+        else:
+            text = f"余额 {self._floating_credits_value}"
+        self._sni_tray.set_label(text, "余额 $99.9999")
+
+    def _apply_indicator_settings(self) -> None:
+        payload = self.config_store.load() or {}
+        want_enabled = (
+            self._indicator_available
+            and bool(payload.get("panel_indicator_enabled"))
+        )
+
+        if self._sni_tray is None or not self._sni_tray.is_active:
+            if want_enabled:
+                sni = SNITray(
+                    activate=self.show_full_window,
+                    refresh=self.refresh_floating_metrics,
+                    show_window=self.show_full_window,
+                    quit=lambda: QApplication.instance().quit(),
+                )
+                if sni.register():
+                    self._sni_tray = sni
+                    self._start_panel_label_rotation()
+                    if self._tray_icon is not None:
+                        self._tray_icon.hide()
+                        self._tray_icon = None
+            return
+
+        if want_enabled:
+            self._sni_tray.show()
+            if self._panel_label_timer is None:
+                self._start_panel_label_rotation()
+        else:
+            self._sni_tray.hide()
+            if self._panel_label_timer is not None:
+                self._panel_label_timer.stop()
+                self._panel_label_timer.deleteLater()
+                self._panel_label_timer = None
+
     def refresh_cache_views(self) -> None:
         self.key_info_page.load_cached_secret()
         self.credits_page.load_cached_secret()
         self.cache_page.refresh_view()
         self._apply_polling_settings()
+        self._apply_indicator_settings()
 
     def _apply_initial_geometry(self) -> None:
         screen = self.screen() or QGuiApplication.primaryScreen()
@@ -1754,7 +1896,11 @@ class MainWindow(FluentWindow):
         if self.floating_window is None:
             InfoBar.warning(
                 title="当前不可用",
-                content="悬浮小窗仅在 X11/xcb 启动时支持",
+                content=(
+                    "数据已显示在顶栏指示器中"
+                    if self._sni_tray is not None and self._sni_tray.is_active
+                    else "悬浮小窗仅在 X11/xcb 启动时支持"
+                ),
                 orient=Qt.Orientation.Horizontal,
                 isClosable=True,
                 position=InfoBarPosition.TOP_RIGHT,
@@ -1798,14 +1944,14 @@ class MainWindow(FluentWindow):
         self._sync_floating_window()
 
     def _sync_floating_window(self) -> None:
-        if self.floating_window is None:
-            return
-        self.floating_window.update_metrics(
-            self._floating_key_value,
-            self._floating_key_time,
-            self._floating_credits_value,
-            self._floating_credits_time,
-        )
+        if self.floating_window is not None:
+            self.floating_window.update_metrics(
+                self._floating_key_value,
+                self._floating_key_time,
+                self._floating_credits_value,
+                self._floating_credits_time,
+            )
+        self._sync_panel_label()
 
     def _evaluate_thresholds(self, mode: str, summary: dict[str, object]) -> None:
         payload = self.config_store.load() or {}
@@ -1875,14 +2021,19 @@ class MainWindow(FluentWindow):
         )
 
     def _notify_system(self, level: str, target: str, subject: str, value: float) -> None:
-        if self._tray_icon is None or not self._tray_icon.isVisible():
-            return
-
         title = APP_DISPLAY_NAME
         content = (
             f"{target} {'Critical' if level == 'critical' else 'Warning'} 告警\n"
             f"{subject} 当前值 {value:.4f}"
         )
+
+        if self._sni_tray is not None and self._sni_tray.is_active:
+            urgency = "critical" if level == "critical" else "normal"
+            self._sni_tray.notify(title, content, urgency)
+            return
+
+        if self._tray_icon is None or not self._tray_icon.isVisible():
+            return
         icon = (
             QSystemTrayIcon.MessageIcon.Critical
             if level == "critical"
@@ -1959,11 +2110,15 @@ class MainWindow(FluentWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self.key_timer.stop()
         self.credits_timer.stop()
+        if self._panel_label_timer is not None:
+            self._panel_label_timer.stop()
         self.key_info_page.stop_worker()
         self.credits_page.stop_worker()
         if self.floating_window is not None:
             self.floating_window.blockSignals(True)
             self.floating_window.close_for_shutdown()
+        if self._sni_tray is not None:
+            self._sni_tray.unregister()
         if self._tray_icon is not None:
             self._tray_icon.hide()
         super().closeEvent(event)

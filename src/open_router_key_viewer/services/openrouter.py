@@ -91,7 +91,7 @@ class OpenRouterClient:
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Accept": "application/json",
-                "User-Agent": "open-router-key-viewer/0.1.1",
+                "User-Agent": "open-router-key-viewer/0.2.0",
             },
             method="GET",
         )
@@ -123,7 +123,7 @@ class OpenRouterClient:
                     "headers": {
                         "Authorization": _mask_secret_header(api_key),
                         "Accept": "application/json",
-                        "User-Agent": "open-router-key-viewer/0.1.1",
+                        "User-Agent": "open-router-key-viewer/0.2.0",
                     },
                 },
                 "response": {

@@ -6,9 +6,11 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from open_router_key_viewer import __version__
 from open_router_key_viewer.models import CreditsInfo, KeyInfo, QueryResult, RateLimit
 
 BASE_URL = "https://openrouter.ai/api/v1"
+USER_AGENT = f"open-router-key-viewer/{__version__}"
 
 
 @dataclass(slots=True)
@@ -91,7 +93,7 @@ class OpenRouterClient:
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Accept": "application/json",
-                "User-Agent": "open-router-key-viewer/0.2.0",
+                "User-Agent": USER_AGENT,
             },
             method="GET",
         )
@@ -123,7 +125,7 @@ class OpenRouterClient:
                     "headers": {
                         "Authorization": _mask_secret_header(api_key),
                         "Accept": "application/json",
-                        "User-Agent": "open-router-key-viewer/0.2.0",
+                        "User-Agent": USER_AGENT,
                     },
                 },
                 "response": {

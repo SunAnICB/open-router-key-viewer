@@ -1,0 +1,7 @@
+interface:
+  display_name: "Project Versioning"
+  short_description: "判断并确认项目版本号升级"
+  default_prompt: "Use $project-versioning to inspect the completed changes, recommend patch, minor, or major for this project, and ask for confirmation before editing pyproject.toml."
+
+policy:
+  allow_implicit_invocation: true

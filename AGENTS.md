@@ -129,6 +129,8 @@ uv run pytest
 - 提交信息应清楚描述意图
 - 功能改动、重构、修复尽量分开提交
 - 不要把无关格式化、重命名和业务修改混在一起
+- 仅当提交由 Codex 直接创建时，提交信息末尾追加 `Co-authored-by: Codex <codex@openai.com>`
+- 其他工具或人工提交不需要追加 Codex 的 co-author 标记
 
 ## 对代理/协作者的要求
 

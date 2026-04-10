@@ -1333,7 +1333,7 @@ class CachePage(QWidget):
         update_layout.addWidget(StrongBodyLabel("软件更新", update_card))
 
         update_hint = CaptionLabel(
-            "控制软件启动时是否自动检查 GitHub Release 更新。默认开启。",
+            "控制软件启动时是否自动检查 GitHub Release 更新。",
             update_card,
         )
         update_hint.setWordWrap(True)

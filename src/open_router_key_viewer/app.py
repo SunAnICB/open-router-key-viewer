@@ -30,6 +30,7 @@ with redirect_stdout(io.StringIO()):
     from qfluentwidgets import (
         BodyLabel,
         CaptionLabel,
+        ComboBox,
         ElevatedCardWidget,
         FluentIcon,
         FluentWindow,
@@ -52,6 +53,7 @@ with redirect_stdout(io.StringIO()):
     )
 
 from open_router_key_viewer import __version__
+from open_router_key_viewer.i18n import DictTranslator, LANGUAGE_OPTIONS, resolve_language_code, tr
 from open_router_key_viewer.services.build_info import get_build_info
 from open_router_key_viewer.services.config_store import ConfigStore
 from open_router_key_viewer.services.openrouter import OpenRouterAPIError, OpenRouterClient
@@ -77,12 +79,23 @@ APP_LICENSE_NAME = "MIT"
 APP_DATA_SOURCE_URL = "https://openrouter.ai/docs/api-reference/overview"
 DISPLAY_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 BINARY_ASSET_NAME = "open-router-key-viewer"
+_tr = tr
 
 
 def format_currency_value(value: object) -> str:
     if isinstance(value, (int, float)):
         return f"${value:.4f}"
     return "-"
+
+
+def install_language(app: QApplication, language_code: str) -> None:
+    translator = getattr(app, "_dict_translator", None)
+    if translator is not None:
+        app.removeTranslator(translator)
+
+    new_translator = DictTranslator(language_code)
+    app.installTranslator(new_translator)
+    app._dict_translator = new_translator  # type: ignore[attr-defined]
 
 
 def show_error_bar(parent: QWidget, title: str, message: str) -> None:
@@ -189,6 +202,9 @@ class MetricCard(ElevatedCardWidget):
         layout.addWidget(self.value_label)
         layout.addWidget(self.note_label)
 
+    def set_title(self, title: str) -> None:
+        self.title_label.setText(title)
+
     def set_value(self, value: str, note: str = "") -> None:
         self.value_label.setText(value)
         self.note_label.setText(note)
@@ -230,6 +246,18 @@ class WarningCard(ElevatedCardWidget):
         text_layout.addWidget(message_label)
 
         layout.addLayout(text_layout, 1)
+        self.title_label = title_label
+        self.message_label = message_label
+        self._title_text = title
+        self._message_text = message
+
+    def retranslate_ui(self, title: str | None = None, message: str | None = None) -> None:
+        if title is not None:
+            self._title_text = title
+        if message is not None:
+            self._message_text = message
+        self.title_label.setText(self._title_text)
+        self.message_label.setText(self._message_text)
 
 
 class UpdateCard(ElevatedCardWidget):
@@ -242,20 +270,21 @@ class UpdateCard(ElevatedCardWidget):
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(12)
-        header.addWidget(StrongBodyLabel("更新", self))
+        self.header_label = StrongBodyLabel(_tr("更新"), self)
+        header.addWidget(self.header_label)
         header.addStretch(1)
 
-        self.check_button = PushButton("检查更新", self)
+        self.check_button = PushButton(_tr("检查更新"), self)
         self.check_button.setIcon(FluentIcon.SYNC)
         header.addWidget(self.check_button)
 
-        self.release_button = PushButton("打开 Release", self)
+        self.release_button = PushButton(_tr("打开 Release"), self)
         self.release_button.setIcon(FluentIcon.LINK)
         self.release_button.setVisible(False)
         self.release_button.setEnabled(False)
         header.addWidget(self.release_button)
 
-        self.replace_button = PrimaryPushButton("下载并替换", self)
+        self.replace_button = PrimaryPushButton(_tr("下载并替换"), self)
         self.replace_button.setIcon(FluentIcon.DOWNLOAD)
         self.replace_button.setVisible(False)
         self.replace_button.setEnabled(False)
@@ -291,6 +320,12 @@ class UpdateCard(ElevatedCardWidget):
         self.replace_button.setVisible(can_replace)
         self.replace_button.setEnabled(can_replace)
 
+    def retranslate_ui(self) -> None:
+        self.header_label.setText(_tr("更新"))
+        self.check_button.setText(_tr("检查更新"))
+        self.release_button.setText(_tr("打开 Release"))
+        self.replace_button.setText(_tr("下载并替换"))
+
 
 class ClickablePathLabel(CaptionLabel):
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -298,14 +333,14 @@ class ClickablePathLabel(CaptionLabel):
         self.setText("")
         self.setWordWrap(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("点击复制路径")
+        self.setToolTip(_tr("点击复制路径"))
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
         path_text = self.text().strip()
         if path_text and path_text != "-":
             QApplication.clipboard().setText(path_text)
             InfoBar.success(
-                title="已复制路径",
+                title=_tr("已复制路径"),
                 content=path_text,
                 orient=Qt.Orientation.Horizontal,
                 isClosable=True,
@@ -352,6 +387,10 @@ class PathActionCard(ElevatedCardWidget):
         self.path_label.setText(path)
         self.button.setEnabled(enabled)
 
+    def set_labels(self, title: str, button_text: str) -> None:
+        self.title_label.setText(title)
+        self.button.setText(button_text)
+
 
 class ResultCard(ElevatedCardWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -360,9 +399,9 @@ class ResultCard(ElevatedCardWidget):
         layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(8)
 
-        self.eyebrow = CaptionLabel("结果摘要", self)
+        self.eyebrow = CaptionLabel(_tr("结果摘要"), self)
         self.value_label = TitleLabel("-", self)
-        self.note_label = BodyLabel("查询成功后会在这里显示关键结果", self)
+        self.note_label = BodyLabel(_tr("查询成功后会在这里显示关键结果"), self)
         self.note_label.setWordWrap(True)
 
         layout.addWidget(self.eyebrow)
@@ -383,6 +422,9 @@ class DetailCard(ElevatedCardWidget):
         self.layout_.setSpacing(10)
         self.title_label = StrongBodyLabel(title, self)
         self.layout_.addWidget(self.title_label)
+
+    def set_title(self, title: str) -> None:
+        self.title_label.setText(title)
 
     def set_rows(self, rows: list[tuple[str, ...]]) -> None:
         while self.layout_.count() > 1:
@@ -445,12 +487,14 @@ class StatusBadge(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 6, 12, 6)
         layout.setSpacing(0)
+        self.kind = "idle"
 
-        self.title_label = CaptionLabel("等待查询", self)
+        self.title_label = CaptionLabel(_tr("等待查询"), self)
         layout.addWidget(self.title_label)
-        self.set_status("idle", "等待查询")
+        self.set_status("idle", _tr("等待查询"))
 
     def set_status(self, kind: str, title: str, detail: str = "") -> None:
+        self.kind = kind
         self.title_label.setText(title)
 
         styles = {
@@ -467,6 +511,15 @@ class StatusBadge(QWidget):
             "}"
             f"QLabel {{ color: {text}; background: transparent; }}"
         )
+
+    def retranslate_ui(self) -> None:
+        mapping = {
+            "idle": _tr("等待查询"),
+            "loading": _tr("查询中"),
+            "success": _tr("查询成功"),
+            "error": _tr("查询失败"),
+        }
+        self.set_status(self.kind, mapping.get(self.kind, _tr("等待查询")))
 
 
 class FloatingMetricCard(ElevatedCardWidget):
@@ -490,6 +543,9 @@ class FloatingMetricCard(ElevatedCardWidget):
         layout.addWidget(self.value_label)
         layout.addSpacing(6)
         layout.addWidget(self.time_label)
+
+    def set_title(self, title: str) -> None:
+        self.title_label.setText(title)
 
     def set_content(self, value: str, refreshed_at: str) -> None:
         self.value_label.setText(value)
@@ -535,7 +591,7 @@ class FloatingWindow(QWidget):
         header_layout.setContentsMargins(2, 2, 2, 2)
         header_layout.setSpacing(3)
 
-        self.refresh_button = PrimaryPushButton("刷新", header)
+        self.refresh_button = PrimaryPushButton(_tr("刷新"), header)
         self.refresh_button.setIcon(FluentIcon.SYNC)
         self.refresh_button.setMinimumWidth(56)
         self.refresh_button.clicked.connect(self.refresh_requested.emit)
@@ -548,7 +604,7 @@ class FloatingWindow(QWidget):
 
         header_layout.addWidget(self.topmost_button)
 
-        self.full_window_button = PushButton("主窗口", header)
+        self.full_window_button = PushButton(_tr("主窗口"), header)
         self.full_window_button.setIcon(FluentIcon.HOME)
         self.full_window_button.setMinimumWidth(56)
         self.full_window_button.clicked.connect(self.full_window_requested.emit)
@@ -556,11 +612,18 @@ class FloatingWindow(QWidget):
 
         shell_layout.addWidget(header)
 
-        self.key_card = FloatingMetricCard("剩余配额", shell)
-        self.credits_card = FloatingMetricCard("账户余额", shell)
+        self.key_card = FloatingMetricCard(_tr("剩余配额"), shell)
+        self.credits_card = FloatingMetricCard(_tr("账户余额"), shell)
         shell_layout.addWidget(self.key_card)
         shell_layout.addWidget(self.credits_card)
         root.addWidget(shell)
+        self._refresh_topmost_button()
+
+    def retranslate_ui(self) -> None:
+        self.refresh_button.setText(_tr("刷新"))
+        self.full_window_button.setText(_tr("主窗口"))
+        self.key_card.set_title(_tr("剩余配额"))
+        self.credits_card.set_title(_tr("账户余额"))
         self._refresh_topmost_button()
 
     def _toggle_topmost(self) -> None:
@@ -570,7 +633,7 @@ class FloatingWindow(QWidget):
 
     def _refresh_topmost_button(self) -> None:
         icon = FluentIcon.PIN if self._topmost_enabled else FluentIcon.UNPIN
-        tip = "取消置顶" if self._topmost_enabled else "置顶"
+        tip = _tr("取消置顶") if self._topmost_enabled else _tr("置顶")
         self.topmost_button.setIcon(icon)
         self.topmost_button.setToolTip(tip)
 
@@ -655,12 +718,17 @@ class BaseQueryPage(QWidget):
         self._http_meta: dict[str, object] = {}
         self._raw_payload: dict[str, object] = {}
         self._last_success_time = "-"
+        self._status_message = _tr("等待查询")
         self._build_ui()
         self.load_cached_secret()
 
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+        existing_layout = self.layout()
+        if isinstance(existing_layout, QVBoxLayout):
+            outer = existing_layout
+        else:
+            outer = QVBoxLayout(self)
+            outer.setContentsMargins(0, 0, 0, 0)
 
         self.scroll_area = SingleDirectionScrollArea(self, Qt.Vertical)
         self.scroll_area.setWidgetResizable(True)
@@ -676,8 +744,8 @@ class BaseQueryPage(QWidget):
         root.setContentsMargins(36, 28, 36, 36)
         root.setSpacing(18)
 
-        title = TitleLabel(self.page_title, self)
-        root.addWidget(title)
+        self.title_label = TitleLabel(_tr(self.page_title), self)
+        root.addWidget(self.title_label)
 
         input_card = ElevatedCardWidget(self)
         input_layout = QVBoxLayout(input_card)
@@ -685,30 +753,30 @@ class BaseQueryPage(QWidget):
         input_layout.setSpacing(10)
         input_row = QHBoxLayout()
         input_row.setSpacing(12)
-        input_label = StrongBodyLabel(self.input_label, input_card)
-        input_label.setMinimumWidth(210)
-        input_row.addWidget(input_label)
+        self.input_label_widget = StrongBodyLabel(_tr(self.input_label), input_card)
+        self.input_label_widget.setMinimumWidth(210)
+        input_row.addWidget(self.input_label_widget)
 
         self.secret_input = PasswordLineEdit(input_card)
-        self.secret_input.setPlaceholderText(self.input_placeholder)
+        self.secret_input.setPlaceholderText(_tr(self.input_placeholder))
         input_row.addWidget(self.secret_input, 1)
 
-        self.paste_button = PushButton("粘贴", input_card)
+        self.paste_button = PushButton(_tr("粘贴"), input_card)
         self.paste_button.setIcon(FluentIcon.PASTE)
         self.paste_button.clicked.connect(self._paste_secret)
         input_row.addWidget(self.paste_button)
 
-        self.copy_button = PushButton("复制", input_card)
+        self.copy_button = PushButton(_tr("复制"), input_card)
         self.copy_button.setIcon(FluentIcon.COPY)
         self.copy_button.clicked.connect(self._copy_secret)
         input_row.addWidget(self.copy_button)
 
-        self.save_button = PushButton("保存缓存", input_card)
+        self.save_button = PushButton(_tr("保存缓存"), input_card)
         self.save_button.setIcon(FluentIcon.SAVE)
         self.save_button.clicked.connect(self._save_secret)
         input_row.addWidget(self.save_button)
 
-        self.clear_saved_button = PushButton("删除缓存", input_card)
+        self.clear_saved_button = PushButton(_tr("删除缓存"), input_card)
         self.clear_saved_button.setIcon(FluentIcon.DELETE)
         self.clear_saved_button.clicked.connect(self._clear_saved_secret)
         input_row.addWidget(self.clear_saved_button)
@@ -724,7 +792,7 @@ class BaseQueryPage(QWidget):
         result_header = QHBoxLayout()
         result_header.setSpacing(12)
 
-        self.query_button = PrimaryPushButton(self.button_text, result_card)
+        self.query_button = PrimaryPushButton(_tr(self.button_text), result_card)
         self.query_button.setIcon(self.button_icon)
         self.query_button.clicked.connect(self._query)
         result_header.addWidget(self.query_button)
@@ -733,12 +801,12 @@ class BaseQueryPage(QWidget):
         result_header.addWidget(self.status_badge)
         result_header.addStretch(1)
 
-        self.time_label = CaptionLabel("最近成功: -", result_card)
+        self.time_label = CaptionLabel(_tr("最近成功: -"), result_card)
         result_header.addWidget(self.time_label)
 
         self.result_mode_switch = SegmentedWidget(result_card)
-        self.result_mode_switch.addItem("summary", "结果卡片", lambda: self._show_result_mode("summary"))
-        self.result_mode_switch.addItem("raw", "原始请求", lambda: self._show_result_mode("raw"))
+        self.result_mode_switch.addItem("summary", _tr("结果卡片"), lambda: self._show_result_mode("summary"))
+        self.result_mode_switch.addItem("raw", _tr("原始请求"), lambda: self._show_result_mode("raw"))
         result_header.addWidget(self.result_mode_switch)
 
         result_layout.addLayout(result_header)
@@ -748,7 +816,7 @@ class BaseQueryPage(QWidget):
         self.summary_layout.setContentsMargins(0, 0, 0, 0)
         self.summary_layout.setSpacing(12)
         self.hero_card = ResultCard(self.summary_container)
-        self.detail_card = DetailCard("详细信息", self.summary_container)
+        self.detail_card = DetailCard(_tr("详细信息"), self.summary_container)
         self.summary_layout.addWidget(self.hero_card)
         self.summary_layout.addWidget(self.detail_card)
         result_layout.addWidget(self.summary_container)
@@ -759,7 +827,9 @@ class BaseQueryPage(QWidget):
         mono = QFont("JetBrains Mono")
         mono.setStyleHint(QFont.StyleHint.Monospace)
         self.result_output.setFont(mono)
-        self.result_output.setPlainText("{\n  \"message\": \"在上方输入 key 后开始查询\"\n}")
+        self.result_output.setPlainText(
+            json.dumps({"message": _tr("在上方输入 key 后开始查询")}, ensure_ascii=False, indent=2)
+        )
         result_layout.addWidget(self.result_output)
 
         root.addWidget(result_card, 1)
@@ -767,6 +837,7 @@ class BaseQueryPage(QWidget):
         self._render_summary_placeholder()
 
     def _set_busy(self, busy: bool, message: str) -> None:
+        self._status_message = message
         self.secret_input.setEnabled(not busy)
         self.query_button.setEnabled(not busy)
         self.paste_button.setEnabled(not busy)
@@ -777,21 +848,21 @@ class BaseQueryPage(QWidget):
     def _query(self) -> None:
         secret = self.secret_input.text().strip()
         if not secret:
-            self._show_error(self.missing_secret_message)
+            self._show_error(_tr(self.missing_secret_message))
             return
         self._run_query(self.mode, secret)
 
     def _save_secret(self) -> None:
         secret = self.secret_input.text().strip()
         if not secret:
-            self._show_error(self.missing_secret_message)
+            self._show_error(_tr(self.missing_secret_message))
             return
 
         self.config_store.save_value(self.config_key, secret)
         self.on_cache_changed()
         InfoBar.success(
-            title="已保存",
-            content="已写入本地缓存",
+            title=_tr("已保存"),
+            content=_tr("已写入本地缓存"),
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP_RIGHT,
@@ -802,13 +873,13 @@ class BaseQueryPage(QWidget):
     def _paste_secret(self) -> None:
         text = QApplication.clipboard().text().strip()
         if not text:
-            self._show_error("剪贴板里没有可用内容")
+            self._show_error(_tr("剪贴板里没有可用内容"))
             return
 
         self.secret_input.setText(text)
         InfoBar.success(
-            title="已粘贴",
-            content="已从剪贴板填入当前 key",
+            title=_tr("已粘贴"),
+            content=_tr("已从剪贴板填入当前 key"),
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP_RIGHT,
@@ -819,13 +890,13 @@ class BaseQueryPage(QWidget):
     def _copy_secret(self) -> None:
         secret = self.secret_input.text().strip()
         if not secret:
-            self._show_error(self.missing_secret_message)
+            self._show_error(_tr(self.missing_secret_message))
             return
 
         QApplication.clipboard().setText(secret)
         InfoBar.success(
-            title="已复制",
-            content="当前 key 已复制到剪贴板",
+            title=_tr("已复制"),
+            content=_tr("当前 key 已复制到剪贴板"),
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP_RIGHT,
@@ -838,8 +909,8 @@ class BaseQueryPage(QWidget):
         self.secret_input.clear()
         self.on_cache_changed()
         InfoBar.success(
-            title="已清除",
-            content="对应缓存已删除",
+            title=_tr("已清除"),
+            content=_tr("对应缓存已删除"),
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP_RIGHT,
@@ -849,15 +920,15 @@ class BaseQueryPage(QWidget):
 
     def _run_query(self, mode: str, secret: str) -> None:
         if self._worker and self._worker.isRunning():
-            self._show_error("已有请求正在执行，请稍候")
+            self._show_error(_tr("已有请求正在执行，请稍候"))
             return
 
-        self._set_busy(True, "查询中...")
-        self.status_badge.set_status("loading", "查询中")
+        self._set_busy(True, _tr("查询中..."))
+        self.status_badge.set_status("loading", _tr("查询中"))
         self._summary_payload = {}
         self._http_meta = {}
         self._raw_payload = {}
-        self._render_summary_placeholder("查询中...")
+        self._render_summary_placeholder(_tr("查询中..."))
         self.result_output.setPlainText("{\n  \"loading\": true\n}")
 
         self._worker = QueryWorker(mode, secret, self)
@@ -868,8 +939,8 @@ class BaseQueryPage(QWidget):
 
     def _handle_success(self, payload: dict) -> None:
         self._last_success_time = datetime.now().strftime(DISPLAY_DATETIME_FORMAT)
-        self.time_label.setText(f"最近成功: {self._last_success_time}")
-        self.status_badge.set_status("success", "查询成功")
+        self._update_time_label()
+        self.status_badge.set_status("success", _tr("查询成功"))
         self._summary_payload = payload.get("summary", {})
         self._http_meta = payload.get("http_meta", {})
         self._raw_payload = payload.get("raw_response", {})
@@ -890,8 +961,8 @@ class BaseQueryPage(QWidget):
             )
         )
         InfoBar.success(
-            title="请求成功",
-            content="OpenRouter 返回了查询结果",
+            title=_tr("请求成功"),
+            content=_tr("OpenRouter 返回了查询结果"),
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP_RIGHT,
@@ -900,12 +971,12 @@ class BaseQueryPage(QWidget):
         )
 
     def _handle_failure(self, message: str) -> None:
-        self.time_label.setText(f"最近成功: {self._last_success_time}")
-        self.status_badge.set_status("error", "查询失败")
+        self._update_time_label()
+        self.status_badge.set_status("error", _tr("查询失败"))
         self._summary_payload = {}
         self._http_meta = {}
         self._raw_payload = {"error": message}
-        self._render_summary_placeholder("查询失败")
+        self._render_summary_placeholder(_tr("查询失败"))
         self.result_output.setPlainText(json.dumps({"error": message}, ensure_ascii=False, indent=2))
         self._show_error(message)
 
@@ -914,7 +985,7 @@ class BaseQueryPage(QWidget):
         self._worker = None
 
     def _show_error(self, message: str) -> None:
-        show_error_bar(self.window(), "请求失败", message)
+        show_error_bar(self.window(), _tr("请求失败"), message)
 
     def _show_result_mode(self, mode: str) -> None:
         showing_summary = mode == "summary"
@@ -923,16 +994,45 @@ class BaseQueryPage(QWidget):
         self.result_mode_switch.setCurrentItem(mode)
 
     def _render_summary_placeholder(self, message: str = "等待查询") -> None:
-        self.hero_card.set_content("状态", message, "查询成功后会在这里显示关键结果")
-        self.detail_card.set_rows([("说明", "暂无结果", "先输入 key，再执行查询")])
+        self.hero_card.set_content(_tr("状态"), message, _tr("查询成功后会在这里显示关键结果"))
+        self.detail_card.set_rows([(_tr("说明"), _tr("暂无结果"), _tr("先输入 key，再执行查询"))])
 
     def _render_summary(self) -> None:
         hero_title, hero_value, hero_note, rows = self.build_result_model(self._summary_payload)
         self.hero_card.set_content(hero_title, hero_value, hero_note)
         self.detail_card.set_rows(rows)
 
+    def _update_time_label(self) -> None:
+        if self._last_success_time == "-":
+            self.time_label.setText(_tr("最近成功: -"))
+            return
+        self.time_label.setText(f"{_tr('最近成功:')} {self._last_success_time}")
+
+    def retranslate_ui(self) -> None:
+        self.title_label.setText(_tr(self.page_title))
+        self.input_label_widget.setText(_tr(self.input_label))
+        self.secret_input.setPlaceholderText(_tr(self.input_placeholder))
+        self.paste_button.setText(_tr("粘贴"))
+        self.copy_button.setText(_tr("复制"))
+        self.save_button.setText(_tr("保存缓存"))
+        self.clear_saved_button.setText(_tr("删除缓存"))
+        self.query_button.setText(_tr(self.button_text))
+        self.detail_card.set_title(_tr("详细信息"))
+        self.result_mode_switch.setItemText("summary", _tr("结果卡片"))
+        self.result_mode_switch.setItemText("raw", _tr("原始请求"))
+        self.status_badge.retranslate_ui()
+        self._update_time_label()
+        if self._summary_payload:
+            self._render_summary()
+        else:
+            self._render_summary_placeholder(self.status_badge.title_label.text())
+            if not self._raw_payload:
+                self.result_output.setPlainText(
+                    json.dumps({"message": _tr("在上方输入 key 后开始查询")}, ensure_ascii=False, indent=2)
+                )
+
     def build_result_model(self, payload: dict[str, object]) -> tuple[str, str, str, list[tuple[str, str, str]]]:
-        return ("结果", "-", "无数据", [("状态", "无数据", "")])
+        return (_tr("结果"), "-", _tr("无数据"), [(_tr("状态"), _tr("无数据"), "")])
 
     def load_cached_secret(self) -> None:
         payload = self.config_store.load()
@@ -999,23 +1099,23 @@ class KeyInfoPage(BaseQueryPage):
             interval = self._display_value(rate_limit.get("interval"))
 
         return (
-            "剩余配额",
+            _tr("剩余配额"),
             self._display_amount(payload.get("limit_remaining")),
-            "当前 key 还能继续使用的额度",
+            _tr("当前 key 还能继续使用的额度"),
             [
-                ("剩余配额", self._display_amount(payload.get("limit_remaining")), "当前 key 还能使用的额度"),
-                ("已用额度", self._display_amount(payload.get("usage")), "当前 key 已累计使用"),
-                ("总额度", self._display_amount(payload.get("limit")), "当前 key 的限制上限"),
-                ("今日使用", self._display_amount(payload.get("usage_daily")), "当天累计使用"),
-                ("本周使用", self._display_amount(payload.get("usage_weekly")), "最近一周累计使用"),
-                ("本月使用", self._display_amount(payload.get("usage_monthly")), "最近一月累计使用"),
-                ("标签", self._display_value(payload.get("label")), "OpenRouter 返回的 key 标签"),
-                ("重置周期", self._display_value(payload.get("limit_reset")), "配额按该周期重置"),
-                ("过期时间", self._display_datetime(payload.get("expires_at")), "key 的过期时间"),
-                ("免费层", self._display_bool(payload.get("is_free_tier")), "是否属于 free tier"),
-                ("管理 Key", self._display_bool(payload.get("is_management_key")), "当前 key 是否具备 management 能力"),
-                ("Provisioning Key", self._display_bool(payload.get("is_provisioning_key")), "当前 key 是否具备 provisioning 能力"),
-                ("速率限制", requests, interval),
+                (_tr("剩余配额"), self._display_amount(payload.get("limit_remaining")), _tr("当前 key 还能使用的额度")),
+                (_tr("已用额度"), self._display_amount(payload.get("usage")), _tr("当前 key 已累计使用")),
+                (_tr("总额度"), self._display_amount(payload.get("limit")), _tr("当前 key 的限制上限")),
+                (_tr("今日使用"), self._display_amount(payload.get("usage_daily")), _tr("当天累计使用")),
+                (_tr("本周使用"), self._display_amount(payload.get("usage_weekly")), _tr("最近一周累计使用")),
+                (_tr("本月使用"), self._display_amount(payload.get("usage_monthly")), _tr("最近一月累计使用")),
+                (_tr("标签"), self._display_value(payload.get("label")), _tr("OpenRouter 返回的 key 标签")),
+                (_tr("重置周期"), self._display_value(payload.get("limit_reset")), _tr("配额按该周期重置")),
+                (_tr("过期时间"), self._display_datetime(payload.get("expires_at")), _tr("key 的过期时间")),
+                (_tr("免费层"), self._display_bool(payload.get("is_free_tier")), _tr("是否属于 free tier")),
+                (_tr("管理 Key"), self._display_bool(payload.get("is_management_key")), _tr("当前 key 是否具备 management 能力")),
+                (_tr("Provisioning Key"), self._display_bool(payload.get("is_provisioning_key")), _tr("当前 key 是否具备 provisioning 能力")),
+                (_tr("速率限制"), requests, interval),
             ],
         )
 
@@ -1026,9 +1126,9 @@ class KeyInfoPage(BaseQueryPage):
 
     def _display_bool(self, value: object) -> str:
         if value is True:
-            return "是"
+            return _tr("是")
         if value is False:
-            return "否"
+            return _tr("否")
         return "-"
 
     def _display_datetime(self, value: object) -> str:
@@ -1069,13 +1169,13 @@ class CreditsPage(BaseQueryPage):
         payload: dict[str, object],
     ) -> tuple[str, str, str, list[tuple[str, str, str]]]:
         return (
-            "剩余余额",
+            _tr("剩余余额"),
             self._display_amount(payload.get("remaining_credits")),
-            "按 total_credits - total_usage 计算",
+            _tr("按 total_credits - total_usage 计算"),
             [
-            ("剩余余额", self._display_amount(payload.get("remaining_credits")), "按 total_credits - total_usage 计算"),
-            ("总余额", self._display_amount(payload.get("total_credits")), "账户累计 credits"),
-            ("已用余额", self._display_amount(payload.get("total_usage")), "账户累计使用"),
+            (_tr("剩余余额"), self._display_amount(payload.get("remaining_credits")), _tr("按 total_credits - total_usage 计算")),
+            (_tr("总余额"), self._display_amount(payload.get("total_credits")), _tr("账户累计 credits")),
+            (_tr("已用余额"), self._display_amount(payload.get("total_usage")), _tr("账户累计使用")),
             ],
         )
 
@@ -1084,6 +1184,7 @@ class CachePage(QWidget):
         self,
         config_store: ConfigStore,
         on_cache_changed: Callable[[], None],
+        on_language_changed: Callable[[str], None],
         on_open_floating_window: Callable[[], None],
         floating_window_supported: bool,
         indicator_available: bool,
@@ -1093,6 +1194,7 @@ class CachePage(QWidget):
         self.setObjectName("cache-page")
         self.config_store = config_store
         self.on_cache_changed = on_cache_changed
+        self.on_language_changed = on_language_changed
         self.on_open_floating_window = on_open_floating_window
         self.floating_window_supported = floating_window_supported
         self.indicator_available = indicator_available
@@ -1100,8 +1202,12 @@ class CachePage(QWidget):
         self.refresh_view()
 
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
+        existing_layout = self.layout()
+        if isinstance(existing_layout, QVBoxLayout):
+            outer = existing_layout
+        else:
+            outer = QVBoxLayout(self)
+            outer.setContentsMargins(0, 0, 0, 0)
 
         self.scroll_area = SingleDirectionScrollArea(self, Qt.Vertical)
         self.scroll_area.setWidgetResizable(True)
@@ -1117,12 +1223,23 @@ class CachePage(QWidget):
         root.setContentsMargins(36, 28, 36, 36)
         root.setSpacing(18)
 
-        root.addWidget(TitleLabel("配置", self))
+        header = QHBoxLayout()
+        header.setSpacing(12)
+        header.addWidget(TitleLabel(_tr("配置"), self))
+        header.addStretch(1)
+        header.addWidget(CaptionLabel(_tr("界面语言"), self))
+        self.language_combo = ComboBox(self)
+        for code, label in LANGUAGE_OPTIONS:
+            self.language_combo.addItem(label, userData=code)
+        self.language_combo.currentIndexChanged.connect(self._handle_language_changed)
+        header.addWidget(self.language_combo)
+        root.addLayout(header)
         root.addWidget(
             WarningCard(
-                "敏感信息提示",
-                "保存后的 OpenRouter API Key、OpenRouter Management Key 和 Webhook URL 会以明文写入本地 config.json。"
-                " 如果设备由多人共用，请谨慎启用保存功能。",
+                _tr("敏感信息提示"),
+                _tr(
+                    "保存后的 OpenRouter API Key、OpenRouter Management Key 和 Webhook URL 会以明文写入本地 config.json。 如果设备由多人共用，请谨慎启用保存功能。"
+                ),
                 self,
             )
         )
@@ -1134,21 +1251,21 @@ class CachePage(QWidget):
         summary_layout.setVerticalSpacing(12)
 
         self.dir_exists_card = PathActionCard(
-            "缓存目录",
-            "删除整个缓存目录",
+            _tr("缓存目录"),
+            _tr("删除整个缓存目录"),
             FluentIcon.DELETE,
             self._delete_config_dir,
             summary_card,
         )
         self.config_exists_card = PathActionCard(
-            "配置文件",
-            "删除配置文件",
+            _tr("配置文件"),
+            _tr("删除配置文件"),
             FluentIcon.DELETE,
             self._delete_config_file,
             summary_card,
         )
-        self.entry_count_card = MetricCard("已缓存项目", "-", "", summary_card)
-        self.file_count_card = MetricCard("目录内文件", "-", "", summary_card)
+        self.entry_count_card = MetricCard(_tr("已缓存项目"), "-", "", summary_card)
+        self.file_count_card = MetricCard(_tr("目录内文件"), "-", "", summary_card)
 
         summary_layout.addWidget(self.dir_exists_card, 0, 0)
         summary_layout.addWidget(self.config_exists_card, 0, 1)
@@ -1163,18 +1280,18 @@ class CachePage(QWidget):
         floating_text = QVBoxLayout()
         floating_text.setContentsMargins(0, 0, 0, 0)
         floating_text.setSpacing(4)
-        floating_text.addWidget(StrongBodyLabel("悬浮小窗", floating_card))
+        floating_text.addWidget(StrongBodyLabel(_tr("悬浮小窗"), floating_card))
         floating_hint_text = (
-            "切换到仅显示剩余配额和账户余额的顶层小窗。"
+            _tr("切换到仅显示剩余配额和账户余额的顶层小窗。")
             if self.floating_window_supported
-            else "当前仅在 X11/xcb 启动时支持悬浮小窗。"
+            else _tr("当前仅在 X11/xcb 启动时支持悬浮小窗。")
         )
         floating_hint = CaptionLabel(floating_hint_text, floating_card)
         floating_hint.setWordWrap(True)
         floating_text.addWidget(floating_hint)
         floating_layout.addLayout(floating_text, 1)
 
-        self.open_floating_button = PrimaryPushButton("打开悬浮小窗", floating_card)
+        self.open_floating_button = PrimaryPushButton(_tr("打开悬浮小窗"), floating_card)
         self.open_floating_button.setIcon(FluentIcon.OPEN_PANE if hasattr(FluentIcon, "OPEN_PANE") else FluentIcon.HOME)
         self.open_floating_button.clicked.connect(self.on_open_floating_window)
         self.open_floating_button.setEnabled(self.floating_window_supported)
@@ -1188,18 +1305,18 @@ class CachePage(QWidget):
         indicator_text = QVBoxLayout()
         indicator_text.setContentsMargins(0, 0, 0, 0)
         indicator_text.setSpacing(4)
-        indicator_text.addWidget(StrongBodyLabel("顶栏指示器", indicator_card))
+        indicator_text.addWidget(StrongBodyLabel(_tr("顶栏指示器"), indicator_card))
         indicator_hint_text = (
-            "在 GNOME 顶栏显示滚动的配额和余额数据（Ubuntu 开箱即用，其他发行版需安装 AppIndicator 扩展）。"
+            _tr("在 GNOME 顶栏显示滚动的配额和余额数据（Ubuntu 开箱即用，其他发行版需安装 AppIndicator 扩展）。")
             if self.indicator_available
-            else "当前环境不支持顶栏指示器（需要 D-Bus StatusNotifierWatcher 服务）。"
+            else _tr("当前环境不支持顶栏指示器（需要 D-Bus StatusNotifierWatcher 服务）。")
         )
         indicator_hint = CaptionLabel(indicator_hint_text, indicator_card)
         indicator_hint.setWordWrap(True)
         indicator_text.addWidget(indicator_hint)
         indicator_layout.addLayout(indicator_text, 1)
         self.indicator_switch_row = self._create_switch_row(
-            "启用顶栏指示器",
+            _tr("启用顶栏指示器"),
             "panel_indicator_enabled",
             indicator_card,
         )
@@ -1211,13 +1328,13 @@ class CachePage(QWidget):
         auto_query_layout = QVBoxLayout(auto_query_card)
         auto_query_layout.setContentsMargins(24, 22, 24, 22)
         auto_query_layout.setSpacing(12)
-        auto_query_layout.addWidget(StrongBodyLabel("自动查询", auto_query_card))
+        auto_query_layout.addWidget(StrongBodyLabel(_tr("自动查询"), auto_query_card))
 
-        auto_query_hint = CaptionLabel("每个对象在同一行设置启动时查询、定时查询和查询间隔。", auto_query_card)
+        auto_query_hint = CaptionLabel(_tr("每个对象在同一行设置启动时查询、定时查询和查询间隔。"), auto_query_card)
         auto_query_layout.addWidget(auto_query_hint)
 
         self.auto_key_row = self._create_auto_query_row(
-            "Key 配额",
+            _tr("Key 配额"),
             "auto_query_key_info",
             "poll_key_info_enabled",
             "poll_key_info_interval_seconds",
@@ -1227,7 +1344,7 @@ class CachePage(QWidget):
         auto_query_layout.addWidget(self.auto_key_row)
 
         self.auto_credits_row = self._create_auto_query_row(
-            "账户余额",
+            _tr("账户余额"),
             "auto_query_credits",
             "poll_credits_enabled",
             "poll_credits_interval_seconds",
@@ -1241,44 +1358,44 @@ class CachePage(QWidget):
         alerts_layout = QVBoxLayout(alerts_card)
         alerts_layout.setContentsMargins(24, 22, 24, 22)
         alerts_layout.setSpacing(12)
-        alerts_layout.addWidget(StrongBodyLabel("告警与通知", alerts_card))
+        alerts_layout.addWidget(StrongBodyLabel(_tr("告警与通知"), alerts_card))
 
         self.notify_in_app_row = self._create_switch_row(
-            "启用应用内通知",
+            _tr("启用应用内通知"),
             "notify_in_app",
             alerts_card,
         )
         alerts_layout.addWidget(self.notify_in_app_row)
         self.notify_system_row = self._create_switch_row(
-            "启用系统通知",
+            _tr("启用系统通知"),
             "notify_system",
             alerts_card,
         )
         alerts_layout.addWidget(self.notify_system_row)
 
         self.key_warning_row = self._create_input_row(
-            "Key 配额 Warning 阈值",
+            _tr("Key 配额 Warning 阈值"),
             "key_info_warning_threshold",
             "5.0",
             alerts_card,
         )
         alerts_layout.addWidget(self.key_warning_row)
         self.key_critical_row = self._create_input_row(
-            "Key 配额 Critical 阈值",
+            _tr("Key 配额 Critical 阈值"),
             "key_info_critical_threshold",
             "1.0",
             alerts_card,
         )
         alerts_layout.addWidget(self.key_critical_row)
         self.credits_warning_row = self._create_input_row(
-            "账户余额 Warning 阈值",
+            _tr("账户余额 Warning 阈值"),
             "credits_warning_threshold",
             "10.0",
             alerts_card,
         )
         alerts_layout.addWidget(self.credits_warning_row)
         self.credits_critical_row = self._create_input_row(
-            "账户余额 Critical 阈值",
+            _tr("账户余额 Critical 阈值"),
             "credits_critical_threshold",
             "2.0",
             alerts_card,
@@ -1286,19 +1403,19 @@ class CachePage(QWidget):
         alerts_layout.addWidget(self.credits_critical_row)
 
         self.webhook_key_switch_row = self._create_switch_row(
-            "启用 Key 配额 Webhook",
+            _tr("启用 Key 配额 Webhook"),
             "notify_webhook_key_info_enabled",
             alerts_card,
         )
         alerts_layout.addWidget(self.webhook_key_switch_row)
         self.webhook_key_only_critical_row = self._create_switch_row(
-            "Key 配额仅 Critical Webhook",
+            _tr("Key 配额仅 Critical Webhook"),
             "notify_webhook_key_info_only_critical",
             alerts_card,
         )
         alerts_layout.addWidget(self.webhook_key_only_critical_row)
         self.webhook_key_url_row = self._create_input_row(
-            "Key 配额 Webhook URL",
+            _tr("Key 配额 Webhook URL"),
             "notify_webhook_key_info_url",
             "https://example.com/key",
             alerts_card,
@@ -1306,19 +1423,19 @@ class CachePage(QWidget):
         alerts_layout.addWidget(self.webhook_key_url_row)
 
         self.webhook_credits_switch_row = self._create_switch_row(
-            "启用账户余额 Webhook",
+            _tr("启用账户余额 Webhook"),
             "notify_webhook_credits_enabled",
             alerts_card,
         )
         alerts_layout.addWidget(self.webhook_credits_switch_row)
         self.webhook_credits_only_critical_row = self._create_switch_row(
-            "账户余额仅 Critical Webhook",
+            _tr("账户余额仅 Critical Webhook"),
             "notify_webhook_credits_only_critical",
             alerts_card,
         )
         alerts_layout.addWidget(self.webhook_credits_only_critical_row)
         self.webhook_credits_url_row = self._create_input_row(
-            "账户余额 Webhook URL",
+            _tr("账户余额 Webhook URL"),
             "notify_webhook_credits_url",
             "https://example.com/credits",
             alerts_card,
@@ -1330,17 +1447,17 @@ class CachePage(QWidget):
         update_layout = QVBoxLayout(update_card)
         update_layout.setContentsMargins(24, 22, 24, 22)
         update_layout.setSpacing(12)
-        update_layout.addWidget(StrongBodyLabel("软件更新", update_card))
+        update_layout.addWidget(StrongBodyLabel(_tr("软件更新"), update_card))
 
         update_hint = CaptionLabel(
-            "控制软件启动时是否自动检查 GitHub Release 更新。",
+            _tr("控制软件启动时是否自动检查 GitHub Release 更新。"),
             update_card,
         )
         update_hint.setWordWrap(True)
         update_layout.addWidget(update_hint)
 
         self.auto_update_row = self._create_switch_row(
-            "启动时自动检查更新",
+            _tr("启动时自动检查更新"),
             "auto_check_updates",
             update_card,
         )
@@ -1359,14 +1476,14 @@ class CachePage(QWidget):
         header.addWidget(self.status_label)
         header.addStretch(1)
 
-        self.refresh_button = PrimaryPushButton("刷新", content_card)
+        self.refresh_button = PrimaryPushButton(_tr("刷新"), content_card)
         self.refresh_button.setIcon(FluentIcon.SYNC)
         self.refresh_button.clicked.connect(self.refresh_view)
         header.addWidget(self.refresh_button)
 
         self.content_mode_switch = SegmentedWidget(content_card)
-        self.content_mode_switch.addItem("data", "解析数据", lambda: self._show_mode("data"))
-        self.content_mode_switch.addItem("file", "原始文件", lambda: self._show_mode("file"))
+        self.content_mode_switch.addItem("data", _tr("解析数据"), lambda: self._show_mode("data"))
+        self.content_mode_switch.addItem("file", _tr("原始文件"), lambda: self._show_mode("file"))
         header.addWidget(self.content_mode_switch)
 
         content_layout.addLayout(header)
@@ -1375,7 +1492,7 @@ class CachePage(QWidget):
         self.parsed_layout = QVBoxLayout(self.parsed_container)
         self.parsed_layout.setContentsMargins(0, 0, 0, 0)
         self.parsed_layout.setSpacing(10)
-        self.parsed_title = StrongBodyLabel("已解析的数据", self.parsed_container)
+        self.parsed_title = StrongBodyLabel(_tr("已解析的数据"), self.parsed_container)
         self.parsed_layout.addWidget(self.parsed_title)
         self.parsed_rows = QWidget(self.parsed_container)
         self.parsed_rows_layout = QVBoxLayout(self.parsed_rows)
@@ -1395,32 +1512,52 @@ class CachePage(QWidget):
         root.addWidget(content_card, 1)
         self._show_mode("data")
 
+    def retranslate_ui(self) -> None:
+        scroll_value = self.scroll_area.verticalScrollBar().value()
+        while self.layout().count():
+            item = self.layout().takeAt(0)
+            widget = item.widget()
+            child_layout = item.layout()
+            if widget is not None:
+                widget.deleteLater()
+            elif child_layout is not None:
+                while child_layout.count():
+                    child_item = child_layout.takeAt(0)
+                    child_widget = child_item.widget()
+                    if child_widget is not None:
+                        child_widget.deleteLater()
+        self._build_ui()
+        self.refresh_view()
+        QTimer.singleShot(0, lambda: self.scroll_area.verticalScrollBar().setValue(scroll_value))
+
     def refresh_view(self) -> None:
         snapshot = self.config_store.inspect()
         loaded_config = snapshot.get("loaded_config")
         payload = loaded_config if isinstance(loaded_config, dict) else {}
+        language_code = resolve_language_code(payload.get("ui_language"))
         files = snapshot.get("files", [])
         file_count = sum(1 for item in files if item.get("type") == "file")
         entry_count = len(payload)
 
         self.dir_exists_card.set_content(
-            "已存在" if snapshot["dir_exists"] else "不存在",
-            "缓存目录路径",
+            _tr("已存在") if snapshot["dir_exists"] else _tr("不存在"),
+            _tr("缓存目录路径"),
             str(snapshot["config_dir"]),
             bool(snapshot["dir_exists"]),
         )
         self.config_exists_card.set_content(
-            "已存在" if snapshot["config_exists"] else "不存在",
-            "config.json 文件路径",
+            _tr("已存在") if snapshot["config_exists"] else _tr("不存在"),
+            _tr("config.json 文件路径"),
             str(snapshot["config_path"]),
             bool(snapshot["config_exists"]),
         )
-        self.entry_count_card.set_value(str(entry_count), "当前解析出的缓存键数量")
-        self.file_count_card.set_value(str(file_count), "缓存目录内的文件数量")
+        self.entry_count_card.set_value(str(entry_count), _tr("当前解析出的缓存键数量"))
+        self.file_count_card.set_value(str(file_count), _tr("缓存目录内的文件数量"))
 
         self.status_label.setText(
-            "已解析本地缓存" if snapshot["config_exists"] else "未找到配置文件"
+            _tr("已解析本地缓存") if snapshot["config_exists"] else _tr("未找到配置文件")
         )
+        self._sync_language_combo(language_code)
         self._sync_auto_query_row(
             self.auto_key_row,
             bool(payload.get("auto_query_key_info", False)),
@@ -1468,9 +1605,28 @@ class CachePage(QWidget):
         self._sync_input_row(self.webhook_credits_url_row, payload.get("notify_webhook_credits_url", ""))
 
         self._render_parsed_data(payload)
-        self._file_text = self.config_store.read_raw_config() or "未找到 config.json 文件"
+        self._file_text = self.config_store.read_raw_config() or _tr("未找到 config.json 文件")
         self.content_output.setPlainText(self._file_text)
         self._show_mode(self._mode)
+
+    def _sync_language_combo(self, language_code: str) -> None:
+        index = self.language_combo.findData(language_code)
+        if index < 0:
+            index = 0
+        self.language_combo.blockSignals(True)
+        self.language_combo.setCurrentIndex(index)
+        self.language_combo.blockSignals(False)
+
+    def _handle_language_changed(self, index: int) -> None:
+        _ = index
+        language_code = self.language_combo.currentData()
+        if not isinstance(language_code, str):
+            return
+        current_language = resolve_language_code((self.config_store.load() or {}).get("ui_language"))
+        if language_code == current_language:
+            return
+        self.config_store.save_value("ui_language", language_code)
+        self.on_language_changed(language_code)
 
     def _show_mode(self, mode: str) -> None:
         self._mode = mode
@@ -1483,6 +1639,7 @@ class CachePage(QWidget):
         mapping = {
             "api_key": "OpenRouter API Key",
             "management_key": "OpenRouter Management Key",
+            "ui_language": "界面语言",
             "auto_check_updates": "启动时自动检查更新",
             "auto_query_key_info": "启动时自动查询 Key 配额",
             "auto_query_credits": "启动时自动查询账户余额",
@@ -1504,17 +1661,23 @@ class CachePage(QWidget):
             "notify_webhook_credits_only_critical": "账户余额仅 Critical Webhook",
             "notify_webhook_credits_url": "账户余额 Webhook URL",
         }
-        return mapping.get(key, key)
+        return _tr(mapping.get(key, key))
 
     def _render_parsed_data(self, loaded_config: object) -> None:
         if not isinstance(loaded_config, dict) or not loaded_config:
-            rows = [("状态", "暂无数据", "")]
+            rows = [(_tr("状态"), _tr("暂无数据"), "")]
         else:
             rows = [
-                (self._display_config_key(key), str(value), "")
+                (self._display_config_key(key), self._display_config_value(key, value), "")
                 for key, value in loaded_config.items()
             ]
         self._render_property_rows(self.parsed_rows_layout, rows)
+
+    def _display_config_value(self, key: str, value: object) -> str:
+        if key == "ui_language" and isinstance(value, str):
+            label_map = {code: label for code, label in LANGUAGE_OPTIONS}
+            return label_map.get(value, value)
+        return str(value)
 
     def _render_property_rows(
         self,
@@ -1587,7 +1750,7 @@ class CachePage(QWidget):
         title_label.setMinimumWidth(96)
         layout.addWidget(title_label)
 
-        auto_label = CaptionLabel("启动时查询", row)
+        auto_label = CaptionLabel(_tr("启动时查询"), row)
         layout.addWidget(auto_label)
 
         auto_switch = SwitchButton(row)
@@ -1596,7 +1759,7 @@ class CachePage(QWidget):
         )
         layout.addWidget(auto_switch)
 
-        poll_label = CaptionLabel("定时查询", row)
+        poll_label = CaptionLabel(_tr("定时查询"), row)
         layout.addWidget(poll_label)
 
         poll_switch = SwitchButton(row)
@@ -1605,7 +1768,7 @@ class CachePage(QWidget):
         )
         layout.addWidget(poll_switch)
 
-        interval_label = CaptionLabel("查询间隔（秒）", row)
+        interval_label = CaptionLabel(_tr("查询间隔（秒）"), row)
         layout.addWidget(interval_label)
 
         interval_input = LineEdit(row)
@@ -1638,7 +1801,7 @@ class CachePage(QWidget):
         line_edit.setPlaceholderText(placeholder)
         layout.addWidget(line_edit, 1)
 
-        save_button = PushButton("保存", row)
+        save_button = PushButton(_tr("保存"), row)
         save_button.clicked.connect(
             lambda: self._save_input_value(config_key, line_edit.text().strip(), placeholder)
         )
@@ -1681,8 +1844,8 @@ class CachePage(QWidget):
         line_edit.blockSignals(False)
 
     def _sync_switch_button(self, button: SwitchButton, checked: bool) -> None:
-        button.setOnText("开启")
-        button.setOffText("关闭")
+        button.setOnText(_tr("开启"))
+        button.setOffText(_tr("关闭"))
 
     def _save_input_value(self, config_key: str, raw_value: str, placeholder: str) -> None:
         if not raw_value:
@@ -1693,20 +1856,20 @@ class CachePage(QWidget):
                 try:
                     value = max(1, int(raw_value))
                 except ValueError:
-                    self._show_error("间隔必须是整数秒")
+                    self._show_error(_tr("间隔必须是整数秒"))
                     return
             elif config_key.endswith("_threshold"):
                 try:
                     value = float(raw_value)
                 except ValueError:
-                    self._show_error("阈值必须是数字")
+                    self._show_error(_tr("阈值必须是数字"))
                     return
             self.config_store.save_value(config_key, value)
 
         self.on_cache_changed()
         InfoBar.success(
-            title="已保存",
-            content="配置已更新",
+            title=_tr("已保存"),
+            content=_tr("配置已更新"),
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP_RIGHT,
@@ -1721,16 +1884,16 @@ class CachePage(QWidget):
         line_edit.blockSignals(False)
 
     def _show_error(self, message: str) -> None:
-        show_error_bar(self.window(), "配置无效", message)
+        show_error_bar(self.window(), _tr("配置无效"), message)
 
     def _delete_config_file(self) -> None:
-        if not self._confirm("删除配置文件", "确认删除 config.json 吗？"):
+        if not self._confirm(_tr("删除配置文件"), _tr("确认删除 config.json 吗？")):
             return
         self.config_store.delete_config_file()
         self.on_cache_changed()
         InfoBar.success(
-            title="已删除",
-            content="配置文件已删除",
+            title=_tr("已删除"),
+            content=_tr("配置文件已删除"),
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP_RIGHT,
@@ -1739,13 +1902,13 @@ class CachePage(QWidget):
         )
 
     def _delete_config_dir(self) -> None:
-        if not self._confirm("删除缓存目录", "确认删除整个 ~/.config/open-router-key-viewer 目录吗？"):
+        if not self._confirm(_tr("删除缓存目录"), _tr("确认删除整个 ~/.config/open-router-key-viewer 目录吗？")):
             return
         self.config_store.delete_config_dir()
         self.on_cache_changed()
         InfoBar.success(
-            title="已删除",
-            content="缓存目录已删除",
+            title=_tr("已删除"),
+            content=_tr("缓存目录已删除"),
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP_RIGHT,
@@ -1755,8 +1918,8 @@ class CachePage(QWidget):
 
     def _confirm(self, title: str, message: str) -> bool:
         box = MessageBox(title, message, self.window())
-        box.yesButton.setText("确认")
-        box.cancelButton.setText("取消")
+        box.yesButton.setText(_tr("确认"))
+        box.cancelButton.setText(_tr("取消"))
         return bool(box.exec())
 
 
@@ -1772,6 +1935,7 @@ class AboutPage(QWidget):
         self._binary_updater = BinaryUpdater(Path(sys.executable)) if self._binary_update_supported else None
         self._build_info = get_build_info()
         self._startup_silent_check = False
+        self._refresh_update_card_state: Callable[[], None] = lambda: None
         if self._binary_updater is not None:
             self._binary_updater.cleanup_stale_updates()
         owner, repo = self._parse_repo(APP_REPOSITORY_URL)
@@ -1801,7 +1965,8 @@ class AboutPage(QWidget):
         root.setContentsMargins(36, 28, 36, 36)
         root.setSpacing(18)
 
-        root.addWidget(TitleLabel("关于", self))
+        self.title_label = TitleLabel(_tr("关于"), self)
+        root.addWidget(self.title_label)
 
         hero_card = ElevatedCardWidget(self)
         hero_layout = QVBoxLayout(hero_card)
@@ -1810,58 +1975,231 @@ class AboutPage(QWidget):
         hero_layout.addWidget(StrongBodyLabel(APP_DISPLAY_NAME, hero_card))
         hero_layout.addWidget(TitleLabel(f"v{__version__}", hero_card))
 
-        description = BodyLabel("用于查询 OpenRouter API Key 配额和 OpenRouter Management Key 账户余额。", hero_card)
-        description.setWordWrap(True)
-        hero_layout.addWidget(description)
+        self.description_label = BodyLabel(
+            _tr("用于查询 OpenRouter API Key 配额和 OpenRouter Management Key 账户余额。"),
+            hero_card,
+        )
+        self.description_label.setWordWrap(True)
+        hero_layout.addWidget(self.description_label)
         root.addWidget(hero_card)
 
         self.update_card = UpdateCard(self)
         self.update_card.check_button.clicked.connect(self._check_updates)
         self.update_card.release_button.clicked.connect(self._open_release_page)
         self.update_card.replace_button.clicked.connect(self._replace_current_binary)
-        if self._binary_update_supported:
-            self.update_card.set_state(
-                "可检查二进制更新",
-                "当前为打包后的二进制运行。点击“检查更新”后，将对比 GitHub Release 中的最新版本。",
-                "支持打开 Release 页面，也支持下载并在应用退出后替换当前二进制文件。",
-                can_open_release=True,
-            )
-        else:
-            self.update_card.set_state(
-                "可检查更新",
-                "当前是源码运行模式。你仍然可以查看最新 Release 和版本信息。",
-                "源码运行不支持下载后直接替换当前二进制文件。",
-                can_open_release=True,
-            )
+        self._show_intro_state()
         root.addWidget(self.update_card)
 
-        details_card = DetailCard("版本信息", self)
-        details_card.set_rows(
+        self.details_card = DetailCard(_tr("版本信息"), self)
+        self.details_card.set_rows(
             [
-                ("应用名称", APP_DISPLAY_NAME, ""),
+                (_tr("应用名称"), APP_DISPLAY_NAME, ""),
                 (
-                    "版本",
+                    _tr("版本"),
                     f"v{__version__}",
                     f"{self._short_commit(self._build_info.commit_sha)} · "
                     f"{'dirty' if self._build_info.dirty else 'clean'}",
                 ),
-                ("运行方式", "二进制发布" if self._binary_update_supported else "源码运行", ""),
-                ("作者", APP_AUTHOR, "", APP_AUTHOR_URL),
+                (_tr("运行方式"), _tr("二进制发布") if self._binary_update_supported else _tr("源码运行"), ""),
+                (_tr("作者"), APP_AUTHOR, "", APP_AUTHOR_URL),
                 ("Python", sys.version.split()[0], ""),
                 ("Qt", qVersion(), ""),
-                ("许可证", APP_LICENSE_NAME, ""),
+                (_tr("许可证"), APP_LICENSE_NAME, ""),
             ]
         )
-        root.addWidget(details_card)
+        root.addWidget(self.details_card)
 
-        notes_card = DetailCard("项目", self)
-        notes_card.set_rows(
+        self.notes_card = DetailCard(_tr("项目"), self)
+        self.notes_card.set_rows(
             [
-                ("仓库地址", "GitHub Repository", "", APP_REPOSITORY_URL),
-                ("数据来源", "OpenRouter API Reference", "", APP_DATA_SOURCE_URL),
+                (_tr("仓库地址"), "GitHub Repository", "", APP_REPOSITORY_URL),
+                (_tr("数据来源"), "OpenRouter API Reference", "", APP_DATA_SOURCE_URL),
             ]
         )
-        root.addWidget(notes_card)
+        root.addWidget(self.notes_card)
+
+    def _show_intro_state(self) -> None:
+        if self._binary_update_supported:
+            self.update_card.set_state(
+                _tr("可检查二进制更新"),
+                _tr("当前为打包后的二进制运行。点击“检查更新”后，将对比 GitHub Release 中的最新版本。"),
+                _tr("支持打开 Release 页面，也支持下载并在应用退出后替换当前二进制文件。"),
+                can_open_release=True,
+            )
+        else:
+            self.update_card.set_state(
+                _tr("可检查更新"),
+                _tr("当前是源码运行模式。你仍然可以查看最新 Release 和版本信息。"),
+                _tr("源码运行不支持下载后直接替换当前二进制文件。"),
+                can_open_release=True,
+            )
+        self._refresh_update_card_state = self._show_intro_state
+
+    def retranslate_ui(self) -> None:
+        self.title_label.setText(_tr("关于"))
+        self.description_label.setText(_tr("用于查询 OpenRouter API Key 配额和 OpenRouter Management Key 账户余额。"))
+        self.update_card.retranslate_ui()
+        self.details_card.set_title(_tr("版本信息"))
+        self.details_card.set_rows(
+            [
+                (_tr("应用名称"), APP_DISPLAY_NAME, ""),
+                (
+                    _tr("版本"),
+                    f"v{__version__}",
+                    f"{self._short_commit(self._build_info.commit_sha)} · "
+                    f"{'dirty' if self._build_info.dirty else 'clean'}",
+                ),
+                (_tr("运行方式"), _tr("二进制发布") if self._binary_update_supported else _tr("源码运行"), ""),
+                (_tr("作者"), APP_AUTHOR, "", APP_AUTHOR_URL),
+                ("Python", sys.version.split()[0], ""),
+                ("Qt", qVersion(), ""),
+                (_tr("许可证"), APP_LICENSE_NAME, ""),
+            ]
+        )
+        self.notes_card.set_title(_tr("项目"))
+        self.notes_card.set_rows(
+            [
+                (_tr("仓库地址"), "GitHub Repository", "", APP_REPOSITORY_URL),
+                (_tr("数据来源"), "OpenRouter API Reference", "", APP_DATA_SOURCE_URL),
+            ]
+        )
+        self._refresh_update_card_state()
+
+    def _start_update_check_state(self) -> None:
+        self.update_card.set_state(
+            _tr("正在检查更新"),
+            _tr("正在查询 GitHub Release 中的最新已发布版本。"),
+            _tr("仅检查正式 Release，不包含 draft 或 prerelease。"),
+        )
+        self._refresh_update_card_state = self._start_update_check_state
+
+    def _show_update_available_state(
+        self,
+        *,
+        current_version: str,
+        release_version: str,
+        asset_note: str,
+        published_at: str,
+        replace_note: str,
+        can_replace: bool,
+    ) -> None:
+        self.update_card.set_state(
+            _tr("发现新版本 v{version}").format(version=release_version),
+            _tr("当前版本 v{current_version}，最新版本 v{release_version}。").format(
+                current_version=current_version,
+                release_version=release_version,
+            ),
+            _tr("{asset_note}  发布时间：{published_at}{replace_note}").format(
+                asset_note=asset_note,
+                published_at=published_at,
+                replace_note=replace_note,
+            ),
+            can_open_release=True,
+            can_replace=can_replace,
+        )
+        self._refresh_update_card_state = lambda: self._show_update_available_state(
+            current_version=current_version,
+            release_version=release_version,
+            asset_note=asset_note,
+            published_at=published_at,
+            replace_note=replace_note,
+            can_replace=can_replace,
+        )
+
+    def _show_dev_build_state(
+        self,
+        *,
+        current_version: str,
+        release_version: str,
+        tag_name: str,
+        published_at: str,
+        commit_note: str,
+    ) -> None:
+        self.update_card.set_state(
+            _tr("当前是非 Release 的开发版本"),
+            _tr("当前构建与最新 Release 不完全一致。版本：v{current_version}，最新 Release：v{release_version}。").format(
+                current_version=current_version,
+                release_version=release_version,
+            ),
+            _tr("最新公开标签：{tag_name}  发布时间：{published_at}{commit_note}").format(
+                tag_name=tag_name,
+                published_at=published_at,
+                commit_note=commit_note,
+            ),
+            can_open_release=True,
+            can_replace=False,
+        )
+        self._refresh_update_card_state = lambda: self._show_dev_build_state(
+            current_version=current_version,
+            release_version=release_version,
+            tag_name=tag_name,
+            published_at=published_at,
+            commit_note=commit_note,
+        )
+
+    def _show_latest_state(self, *, current_version: str, tag_name: str, published_at: str) -> None:
+        self.update_card.set_state(
+            _tr("当前已是最新版本"),
+            _tr("当前版本 v{current_version} 已与最新 Release 保持一致。").format(
+                current_version=current_version
+            ),
+            _tr("最新标签：{tag_name}  发布时间：{published_at}").format(
+                tag_name=tag_name,
+                published_at=published_at,
+            ),
+            can_open_release=True,
+            can_replace=False,
+        )
+        self._refresh_update_card_state = lambda: self._show_latest_state(
+            current_version=current_version,
+            tag_name=tag_name,
+            published_at=published_at,
+        )
+
+    def _show_update_failure_state(self, message: str) -> None:
+        self.update_card.set_state(
+            _tr("检查更新失败"),
+            message,
+            _tr("请稍后重试，或手动打开 GitHub Release 页面查看。"),
+            can_open_release=True,
+            can_replace=False,
+        )
+        self._refresh_update_card_state = lambda: self._show_update_failure_state(message)
+
+    def _show_downloading_state(self, *, name: str, meta: str, note: str | None = None) -> None:
+        note_text = note or _tr("正在下载 {name}。").format(name=name)
+        self.update_card.set_state(
+            _tr("正在下载更新"),
+            note_text,
+            meta,
+            can_open_release=False,
+            can_replace=False,
+        )
+        self._refresh_update_card_state = lambda: self._show_downloading_state(
+            name=name,
+            meta=meta,
+            note=note_text,
+        )
+
+    def _show_downloaded_state(self, *, filename: str) -> None:
+        self.update_card.set_state(
+            _tr("更新已下载完成"),
+            _tr("正在退出当前程序并应用新版本。"),
+            _tr("目标文件：{filename}  程序将自动重新启动。").format(filename=filename),
+            can_open_release=False,
+            can_replace=False,
+        )
+        self._refresh_update_card_state = lambda: self._show_downloaded_state(filename=filename)
+
+    def _show_download_failed_state(self, message: str) -> None:
+        self.update_card.set_state(
+            _tr("下载更新失败"),
+            message,
+            _tr("你仍然可以打开 Release 页面手动下载。"),
+            can_open_release=True,
+            can_replace=self._binary_update_supported and self._latest_asset is not None,
+        )
+        self._refresh_update_card_state = lambda: self._show_download_failed_state(message)
 
     def _check_updates(self) -> None:
         self._startup_silent_check = False
@@ -1880,10 +2218,11 @@ class AboutPage(QWidget):
         self.update_card.replace_button.setEnabled(False)
         if not self._startup_silent_check:
             self.update_card.set_state(
-                "正在检查更新",
-                "正在查询 GitHub Release 中的最新已发布版本。",
-                "仅检查正式 Release，不包含 draft 或 prerelease。",
+                _tr("正在检查更新"),
+                _tr("正在查询 GitHub Release 中的最新已发布版本。"),
+                _tr("仅检查正式 Release，不包含 draft 或 prerelease。"),
             )
+            self._refresh_update_card_state = self._start_update_check_state
         self._update_worker = UpdateCheckWorker(self._release_checker, self)
         self._update_worker.succeeded.connect(self._handle_update_success)
         self._update_worker.failed.connect(self._handle_update_failure)
@@ -1892,16 +2231,16 @@ class AboutPage(QWidget):
 
     def _handle_update_success(self, result: object) -> None:
         if not isinstance(result, UpdateCheckResult):
-            self._handle_update_failure("检查更新失败：返回结果不符合预期")
+            self._handle_update_failure(_tr("检查更新失败：返回结果不符合预期"))
             return
 
         release = result.latest_release
         self._release_url = release.html_url
         self._latest_asset = release.asset
         asset_note = (
-            f"下载文件：{release.asset.name}"
+            _tr("下载文件：{name}").format(name=release.asset.name)
             if release.asset is not None
-            else "该 Release 未找到匹配的二进制资产，将打开发布页面。"
+            else _tr("该 Release 未找到匹配的二进制资产，将打开发布页面。")
         )
         can_replace = bool(result.update_available and self._binary_update_supported and release.asset is not None)
         replace_note = ""
@@ -1911,17 +2250,20 @@ class AboutPage(QWidget):
             if reason:
                 replace_note = f"  {reason}"
         if result.update_available:
-            self.update_card.set_state(
-                f"发现新版本 v{release.version}",
-                f"当前版本 v{result.current_version}，最新版本 v{release.version}。",
-                f"{asset_note}  发布时间：{self._format_release_time(release.published_at)}{replace_note}",
-                can_open_release=True,
+            self._show_update_available_state(
+                current_version=result.current_version,
+                release_version=release.version,
+                asset_note=asset_note,
+                published_at=self._format_release_time(release.published_at),
+                replace_note=replace_note,
                 can_replace=can_replace,
             )
             if self._startup_silent_check:
                 InfoBar.info(
-                    title="发现新版本",
-                    content=f"检测到 v{release.version} 可用，可在关于页查看并更新。",
+                    title=_tr("发现新版本"),
+                    content=_tr("检测到 v{release.version} 可用，可在关于页查看并更新。").format(
+                        release=release
+                    ),
                     orient=Qt.Orientation.Horizontal,
                     isClosable=True,
                     position=InfoBarPosition.TOP_RIGHT,
@@ -1943,21 +2285,23 @@ class AboutPage(QWidget):
             commit_note = ""
             if release.commit_sha:
                 commit_note = (
-                    f"  当前 Commit：{self._short_commit(self._build_info.commit_sha)}"
-                    f"  Release Commit：{self._short_commit(release.commit_sha)}"
+                    _tr("  当前 Commit：{current_commit}  Release Commit：{release_commit}").format(
+                        current_commit=self._short_commit(self._build_info.commit_sha),
+                        release_commit=self._short_commit(release.commit_sha),
+                    )
                 )
             self._latest_asset = None
-            self.update_card.set_state(
-                "当前是非 Release 的开发版本",
-                f"当前构建与最新 Release 不完全一致。版本：v{result.current_version}，最新 Release：v{release.version}。",
-                f"最新公开标签：{release.tag_name}  发布时间：{self._format_release_time(release.published_at)}{commit_note}",
-                can_open_release=True,
-                can_replace=False,
+            self._show_dev_build_state(
+                current_version=result.current_version,
+                release_version=release.version,
+                tag_name=release.tag_name,
+                published_at=self._format_release_time(release.published_at),
+                commit_note=commit_note,
             )
             if self._startup_silent_check:
                 InfoBar.info(
-                    title="当前是开发版本",
-                    content="当前构建与最新 Release 不完全一致，可在关于页查看详情。",
+                    title=_tr("当前是开发版本"),
+                    content=_tr("当前构建与最新 Release 不完全一致，可在关于页查看详情。"),
                     orient=Qt.Orientation.Horizontal,
                     isClosable=True,
                     position=InfoBarPosition.TOP_RIGHT,
@@ -1967,19 +2311,17 @@ class AboutPage(QWidget):
             return
 
         self._latest_asset = None
-        self.update_card.set_state(
-            "当前已是最新版本",
-            f"当前版本 v{result.current_version} 已与最新 Release 保持一致。",
-            f"最新标签：{release.tag_name}  发布时间：{self._format_release_time(release.published_at)}",
-            can_open_release=True,
-            can_replace=False,
+        self._show_latest_state(
+            current_version=result.current_version,
+            tag_name=release.tag_name,
+            published_at=self._format_release_time(release.published_at),
         )
 
     def _handle_update_failure(self, message: str) -> None:
         self._latest_asset = None
         if self._startup_silent_check:
             InfoBar.warning(
-                title="自动检查更新失败",
+                title=_tr("自动检查更新失败"),
                 content=message,
                 orient=Qt.Orientation.Horizontal,
                 isClosable=True,
@@ -1988,14 +2330,8 @@ class AboutPage(QWidget):
                 parent=self.window(),
             )
         else:
-            self.update_card.set_state(
-                "检查更新失败",
-                message,
-                "请稍后重试，或手动打开 GitHub Release 页面查看。",
-                can_open_release=True,
-                can_replace=False,
-            )
-            show_error_bar(self.window(), "检查更新失败", message)
+            self._show_update_failure_state(message)
+            show_error_bar(self.window(), _tr("检查更新失败"), message)
 
     def _handle_update_finished(self) -> None:
         self.update_card.check_button.setEnabled(True)
@@ -2010,25 +2346,24 @@ class AboutPage(QWidget):
 
     def _replace_current_binary(self) -> None:
         if not self._binary_update_supported or self._binary_updater is None:
-            self._handle_update_failure("当前运行方式不支持直接替换二进制文件")
+            self._handle_update_failure(_tr("当前运行方式不支持直接替换二进制文件"))
             return
         if self._latest_asset is None:
-            self._handle_update_failure("当前未找到可替换的二进制更新文件")
+            self._handle_update_failure(_tr("当前未找到可替换的二进制更新文件"))
             return
 
         supported, reason = self._binary_updater.can_replace_current_binary()
         if not supported:
-            self._handle_update_failure(reason or "当前环境不支持替换二进制文件")
+            self._handle_update_failure(reason or _tr("当前环境不支持替换二进制文件"))
             return
 
         box = MessageBox(
-            "下载并替换当前二进制",
-            "将下载最新二进制文件，并在你关闭当前程序后替换当前可执行文件。\n"
-            "下载完成后会自动退出当前程序，替换完成后自动重新启动。是否继续？",
+            _tr("下载并替换当前二进制"),
+            _tr("将下载最新二进制文件，并在你关闭当前程序后替换当前可执行文件。\n下载完成后会自动退出当前程序，替换完成后自动重新启动。是否继续？"),
             self.window(),
         )
-        box.yesButton.setText("继续")
-        box.cancelButton.setText("取消")
+        box.yesButton.setText(_tr("继续"))
+        box.cancelButton.setText(_tr("取消"))
         if not box.exec():
             return
 
@@ -2036,12 +2371,9 @@ class AboutPage(QWidget):
             self.update_card.check_button.setEnabled(False)
             self.update_card.release_button.setEnabled(False)
             self.update_card.replace_button.setEnabled(False)
-            self.update_card.set_state(
-                "正在下载更新",
-                f"正在下载 {self._latest_asset.name}。",
-                "下载完成后将自动退出当前程序，替换二进制并重新启动。",
-                can_open_release=False,
-                can_replace=False,
+            self._show_downloading_state(
+                name=self._latest_asset.name,
+                meta=_tr("下载完成后将自动退出当前程序，替换二进制并重新启动。"),
             )
             self._install_worker = UpdateInstallWorker(
                 self._binary_updater,
@@ -2061,36 +2393,28 @@ class AboutPage(QWidget):
     def _handle_install_progress(self, received: int, total: int) -> None:
         if total > 0:
             percent = int(received * 100 / total)
-            meta = f"已下载 {self._format_bytes(received)} / {self._format_bytes(total)} ({percent}%)"
+            meta = _tr("已下载 {received} / {total} ({percent}%)").format(
+                received=self._format_bytes(received),
+                total=self._format_bytes(total),
+                percent=percent,
+            )
         else:
-            meta = f"已下载 {self._format_bytes(received)}"
-        self.update_card.set_state(
-            "正在下载更新",
-            "下载完成后将自动退出当前程序，替换二进制并重新启动。",
-            meta,
-            can_open_release=False,
-            can_replace=False,
+            meta = _tr("已下载 {received}").format(received=self._format_bytes(received))
+        self._show_downloading_state(
+            name="",
+            note=_tr("下载完成后将自动退出当前程序，替换二进制并重新启动。"),
+            meta=meta,
         )
 
     def _handle_install_success(self) -> None:
-        self.update_card.set_state(
-            "更新已下载完成",
-            "正在退出当前程序并应用新版本。",
-            f"目标文件：{os.path.basename(sys.executable)}  程序将自动重新启动。",
-            can_open_release=False,
-            can_replace=False,
+        self._show_downloaded_state(
+            filename=os.path.basename(sys.executable),
         )
         QTimer.singleShot(300, QApplication.instance().quit)
 
     def _handle_install_failure(self, message: str) -> None:
-        self.update_card.set_state(
-            "下载更新失败",
-            message,
-            "你仍然可以打开 Release 页面手动下载。",
-            can_open_release=True,
-            can_replace=self._binary_update_supported and self._latest_asset is not None,
-        )
-        show_error_bar(self.window(), "下载更新失败", message)
+        self._show_download_failed_state(message)
+        show_error_bar(self.window(), _tr("下载更新失败"), message)
 
     def _handle_install_finished(self) -> None:
         self._install_worker = None
@@ -2166,6 +2490,7 @@ class MainWindow(FluentWindow):
         self.cache_page = CachePage(
             self.config_store,
             self.refresh_cache_views,
+            self.apply_language,
             self.show_floating_window,
             self._floating_window_supported,
             self._indicator_available,
@@ -2175,10 +2500,14 @@ class MainWindow(FluentWindow):
         self.floating_window: FloatingWindow | None = None
         if self._floating_window_supported:
             self.floating_window = self._create_floating_window(topmost=True)
-        self.addSubInterface(self.key_info_page, FluentIcon.CERTIFICATE, "Key 配额")
-        self.addSubInterface(self.credits_page, FluentIcon.PIE_SINGLE, "账户余额")
-        self.addSubInterface(self.cache_page, FluentIcon.SETTING, "配置")
-        self.addSubInterface(self.about_page, FluentIcon.INFO, "关于")
+        self.key_nav_item = self.addSubInterface(
+            self.key_info_page, FluentIcon.CERTIFICATE, _tr("Key 配额")
+        )
+        self.credits_nav_item = self.addSubInterface(
+            self.credits_page, FluentIcon.PIE_SINGLE, _tr("账户余额")
+        )
+        self.cache_nav_item = self.addSubInterface(self.cache_page, FluentIcon.SETTING, _tr("配置"))
+        self.about_nav_item = self.addSubInterface(self.about_page, FluentIcon.INFO, _tr("关于"))
         self.navigationInterface.setReturnButtonVisible(False)
         self.setWindowTitle(APP_DISPLAY_NAME)
         self._apply_initial_geometry()
@@ -2249,10 +2578,40 @@ class MainWindow(FluentWindow):
         if self._sni_tray is None or not self._sni_tray.is_active:
             return
         if self._panel_label_phase == 0:
-            text = f"配额 {self._floating_key_value}"
+            text = f"{_tr('配额')} {self._floating_key_value}"
         else:
-            text = f"余额 {self._floating_credits_value}"
-        self._sni_tray.set_label(text, "余额 $99.9999")
+            text = f"{_tr('余额')} {self._floating_credits_value}"
+        self._sni_tray.set_label(text, f"{_tr('余额')} $99.9999")
+
+    def apply_language(self, language_code: str) -> None:
+        app = QApplication.instance()
+        if app is None:
+            return
+        install_language(app, language_code)
+        self.retranslate_ui()
+        InfoBar.success(
+            title=_tr("已保存"),
+            content=_tr("界面语言已更新"),
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=2500,
+            parent=self,
+        )
+
+    def retranslate_ui(self) -> None:
+        self.key_nav_item.setText(_tr("Key 配额"))
+        self.credits_nav_item.setText(_tr("账户余额"))
+        self.cache_nav_item.setText(_tr("配置"))
+        self.about_nav_item.setText(_tr("关于"))
+        self.key_info_page.retranslate_ui()
+        self.credits_page.retranslate_ui()
+        self.cache_page.retranslate_ui()
+        self.about_page.retranslate_ui()
+        if self.floating_window is not None:
+            self.floating_window.retranslate_ui()
+        self._sync_floating_window()
+        self._sync_panel_label()
 
     def _apply_indicator_settings(self) -> None:
         payload = self.config_store.load() or {}
@@ -2388,11 +2747,11 @@ class MainWindow(FluentWindow):
     def show_floating_window(self) -> None:
         if self.floating_window is None:
             InfoBar.warning(
-                title="当前不可用",
+                title=_tr("当前不可用"),
                 content=(
-                    "数据已显示在顶栏指示器中"
+                    _tr("数据已显示在顶栏指示器中")
                     if self._sni_tray is not None and self._sni_tray.is_active
-                    else "悬浮小窗仅在 X11/xcb 启动时支持"
+                    else _tr("悬浮小窗仅在 X11/xcb 启动时支持")
                 ),
                 orient=Qt.Orientation.Horizontal,
                 isClosable=True,
@@ -2452,14 +2811,14 @@ class MainWindow(FluentWindow):
             value = summary.get("limit_remaining")
             warning = payload.get("key_info_warning_threshold")
             critical = payload.get("key_info_critical_threshold")
-            target = "Key 配额"
+            target = _tr("Key 配额")
             label = summary.get("label")
             subject = f"{target} · {label}" if isinstance(label, str) and label.strip() else target
         else:
             value = summary.get("remaining_credits")
             warning = payload.get("credits_warning_threshold")
             critical = payload.get("credits_critical_threshold")
-            target = "账户余额"
+            target = _tr("账户余额")
             subject = target
 
         if not isinstance(value, (int, float)):
@@ -2498,9 +2857,11 @@ class MainWindow(FluentWindow):
 
     def _notify_in_app(self, level: str, target: str, subject: str, value: float) -> None:
         title = APP_DISPLAY_NAME
-        content = (
-            f"{target} {'Critical' if level == 'critical' else 'Warning'} 告警\n"
-            f"{subject} 当前值 {value:.4f}"
+        content = _tr("{target} {level} 告警\n{subject} 当前值 {value:.4f}").format(
+            target=target,
+            level="Critical" if level == "critical" else "Warning",
+            subject=subject,
+            value=value,
         )
         factory = InfoBar.error if level == "critical" else InfoBar.warning
         factory(
@@ -2515,9 +2876,11 @@ class MainWindow(FluentWindow):
 
     def _notify_system(self, level: str, target: str, subject: str, value: float) -> None:
         title = APP_DISPLAY_NAME
-        content = (
-            f"{target} {'Critical' if level == 'critical' else 'Warning'} 告警\n"
-            f"{subject} 当前值 {value:.4f}"
+        content = _tr("{target} {level} 告警\n{subject} 当前值 {value:.4f}").format(
+            target=target,
+            level="Critical" if level == "critical" else "Warning",
+            subject=subject,
+            value=value,
         )
 
         if self._sni_tray is not None and self._sni_tray.is_active:
@@ -2622,6 +2985,9 @@ def main() -> int:
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(sys.argv)
+    config_store = ConfigStore()
+    payload = config_store.load() or {}
+    install_language(app, resolve_language_code(payload.get("ui_language")))
     app.setApplicationName(APP_DISPLAY_NAME)
     app.setApplicationVersion(__version__)
     setThemeColor("#0F6CBD")

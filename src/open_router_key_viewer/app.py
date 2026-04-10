@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import threading
 from collections.abc import Callable
 from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from PySide6.QtCore import QPoint, QThread, QTimer, Qt, Signal, qVersion
-from PySide6.QtGui import QCloseEvent, QFont, QGuiApplication, QIcon, QMouseEvent
+from PySide6.QtCore import QPoint, QThread, QTimer, Qt, QUrl, Signal, qVersion
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QFont, QGuiApplication, QIcon, QMouseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -50,8 +52,17 @@ with redirect_stdout(io.StringIO()):
     )
 
 from open_router_key_viewer import __version__
+from open_router_key_viewer.services.build_info import get_build_info
 from open_router_key_viewer.services.config_store import ConfigStore
 from open_router_key_viewer.services.openrouter import OpenRouterAPIError, OpenRouterClient
+from open_router_key_viewer.services.update_checker import (
+    BinaryUpdater,
+    ReleaseAsset,
+    GitHubReleaseChecker,
+    UpdateCheckError,
+    UpdateInstallError,
+    UpdateCheckResult,
+)
 
 try:
     from open_router_key_viewer.sni_tray import SNITray
@@ -65,6 +76,7 @@ APP_REPOSITORY_URL = "https://github.com/SunAnICB/open-router-key-viewer"
 APP_LICENSE_NAME = "MIT"
 APP_DATA_SOURCE_URL = "https://openrouter.ai/docs/api-reference/overview"
 DISPLAY_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+BINARY_ASSET_NAME = "open-router-key-viewer"
 
 
 def format_currency_value(value: object) -> str:
@@ -108,6 +120,56 @@ class QueryWorker(QThread):
             return
 
         self.succeeded.emit(result.to_dict())
+
+
+class UpdateCheckWorker(QThread):
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, checker: GitHubReleaseChecker, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.checker = checker
+
+    def run(self) -> None:
+        try:
+            result = self.checker.check_latest_release()
+        except UpdateCheckError as exc:
+            self.failed.emit(str(exc))
+            return
+        self.succeeded.emit(result)
+
+
+class UpdateInstallWorker(QThread):
+    progress_changed = Signal(int, int)
+    succeeded = Signal()
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        updater: BinaryUpdater,
+        asset: ReleaseAsset,
+        current_pid: int,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.updater = updater
+        self.asset = asset
+        self.current_pid = current_pid
+
+    def run(self) -> None:
+        try:
+            self.updater.install_from_asset(
+                self.asset,
+                current_pid=self.current_pid,
+                progress_callback=self._emit_progress,
+            )
+        except UpdateInstallError as exc:
+            self.failed.emit(str(exc))
+            return
+        self.succeeded.emit()
+
+    def _emit_progress(self, received: int, total: int | None) -> None:
+        self.progress_changed.emit(received, total or 0)
 
 
 class MetricCard(ElevatedCardWidget):
@@ -168,6 +230,66 @@ class WarningCard(ElevatedCardWidget):
         text_layout.addWidget(message_label)
 
         layout.addLayout(text_layout, 1)
+
+
+class UpdateCard(ElevatedCardWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(12)
+        header.addWidget(StrongBodyLabel("更新", self))
+        header.addStretch(1)
+
+        self.check_button = PushButton("检查更新", self)
+        self.check_button.setIcon(FluentIcon.SYNC)
+        header.addWidget(self.check_button)
+
+        self.release_button = PushButton("打开 Release", self)
+        self.release_button.setIcon(FluentIcon.LINK)
+        self.release_button.setVisible(False)
+        self.release_button.setEnabled(False)
+        header.addWidget(self.release_button)
+
+        self.replace_button = PrimaryPushButton("下载并替换", self)
+        self.replace_button.setIcon(FluentIcon.DOWNLOAD)
+        self.replace_button.setVisible(False)
+        self.replace_button.setEnabled(False)
+        header.addWidget(self.replace_button)
+
+        layout.addLayout(header)
+
+        self.status_label = TitleLabel("-", self)
+        layout.addWidget(self.status_label)
+
+        self.note_label = BodyLabel("", self)
+        self.note_label.setWordWrap(True)
+        layout.addWidget(self.note_label)
+
+        self.meta_label = CaptionLabel("", self)
+        self.meta_label.setWordWrap(True)
+        layout.addWidget(self.meta_label)
+
+    def set_state(
+        self,
+        title: str,
+        note: str,
+        meta: str = "",
+        *,
+        can_open_release: bool = False,
+        can_replace: bool = False,
+    ) -> None:
+        self.status_label.setText(title)
+        self.note_label.setText(note)
+        self.meta_label.setText(meta)
+        self.release_button.setVisible(can_open_release)
+        self.release_button.setEnabled(can_open_release)
+        self.replace_button.setVisible(can_replace)
+        self.replace_button.setEnabled(can_replace)
 
 
 class ClickablePathLabel(CaptionLabel):
@@ -1204,6 +1326,27 @@ class CachePage(QWidget):
         alerts_layout.addWidget(self.webhook_credits_url_row)
         root.addWidget(alerts_card)
 
+        update_card = ElevatedCardWidget(self)
+        update_layout = QVBoxLayout(update_card)
+        update_layout.setContentsMargins(24, 22, 24, 22)
+        update_layout.setSpacing(12)
+        update_layout.addWidget(StrongBodyLabel("软件更新", update_card))
+
+        update_hint = CaptionLabel(
+            "控制软件启动时是否自动检查 GitHub Release 更新。默认开启。",
+            update_card,
+        )
+        update_hint.setWordWrap(True)
+        update_layout.addWidget(update_hint)
+
+        self.auto_update_row = self._create_switch_row(
+            "启动时自动检查更新",
+            "auto_check_updates",
+            update_card,
+        )
+        update_layout.addWidget(self.auto_update_row)
+        root.addWidget(update_card)
+
         content_card = ElevatedCardWidget(self)
         content_layout = QVBoxLayout(content_card)
         content_layout.setContentsMargins(24, 24, 24, 24)
@@ -1291,6 +1434,10 @@ class CachePage(QWidget):
             payload.get("poll_credits_interval_seconds", 300),
         )
         self._sync_switch_state(
+            self.auto_update_row,
+            bool(payload.get("auto_check_updates", True)),
+        )
+        self._sync_switch_state(
             self.indicator_switch_row,
             bool(payload.get("panel_indicator_enabled", False)),
         )
@@ -1336,6 +1483,7 @@ class CachePage(QWidget):
         mapping = {
             "api_key": "OpenRouter API Key",
             "management_key": "OpenRouter Management Key",
+            "auto_check_updates": "启动时自动检查更新",
             "auto_query_key_info": "启动时自动查询 Key 配额",
             "auto_query_credits": "启动时自动查询账户余额",
             "poll_key_info_enabled": "启用 Key 配额定时查询",
@@ -1616,6 +1764,23 @@ class AboutPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("about-page")
+        self._release_url = APP_REPOSITORY_URL + "/releases"
+        self._latest_asset: ReleaseAsset | None = None
+        self._update_worker: UpdateCheckWorker | None = None
+        self._install_worker: UpdateInstallWorker | None = None
+        self._binary_update_supported = bool(getattr(sys, "frozen", False))
+        self._binary_updater = BinaryUpdater(Path(sys.executable)) if self._binary_update_supported else None
+        self._build_info = get_build_info()
+        self._startup_silent_check = False
+        if self._binary_updater is not None:
+            self._binary_updater.cleanup_stale_updates()
+        owner, repo = self._parse_repo(APP_REPOSITORY_URL)
+        self._release_checker = GitHubReleaseChecker(
+            owner,
+            repo,
+            asset_name=BINARY_ASSET_NAME,
+            current_version=__version__,
+        )
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -1650,16 +1815,41 @@ class AboutPage(QWidget):
         hero_layout.addWidget(description)
         root.addWidget(hero_card)
 
+        self.update_card = UpdateCard(self)
+        self.update_card.check_button.clicked.connect(self._check_updates)
+        self.update_card.release_button.clicked.connect(self._open_release_page)
+        self.update_card.replace_button.clicked.connect(self._replace_current_binary)
+        if self._binary_update_supported:
+            self.update_card.set_state(
+                "可检查二进制更新",
+                "当前为打包后的二进制运行。点击“检查更新”后，将对比 GitHub Release 中的最新版本。",
+                "支持打开 Release 页面，也支持下载并在应用退出后替换当前二进制文件。",
+                can_open_release=True,
+            )
+        else:
+            self.update_card.set_state(
+                "可检查更新",
+                "当前是源码运行模式。你仍然可以查看最新 Release 和版本信息。",
+                "源码运行不支持下载后直接替换当前二进制文件。",
+                can_open_release=True,
+            )
+        root.addWidget(self.update_card)
+
         details_card = DetailCard("版本信息", self)
         details_card.set_rows(
             [
                 ("应用名称", APP_DISPLAY_NAME, ""),
-                ("当前版本", __version__, ""),
+                (
+                    "版本",
+                    f"v{__version__}",
+                    f"{self._short_commit(self._build_info.commit_sha)} · "
+                    f"{'dirty' if self._build_info.dirty else 'clean'}",
+                ),
+                ("运行方式", "二进制发布" if self._binary_update_supported else "源码运行", ""),
                 ("作者", APP_AUTHOR, "", APP_AUTHOR_URL),
                 ("Python", sys.version.split()[0], ""),
                 ("Qt", qVersion(), ""),
                 ("许可证", APP_LICENSE_NAME, ""),
-                ("构建时间", self._build_time_text(), ""),
             ]
         )
         root.addWidget(details_card)
@@ -1673,18 +1863,273 @@ class AboutPage(QWidget):
         )
         root.addWidget(notes_card)
 
-    def _build_time_text(self) -> str:
-        candidates = [
-            Path(sys.executable),
-            Path(__file__),
-        ]
-        for path in candidates:
-            try:
-                if path.exists():
-                    return datetime.fromtimestamp(path.stat().st_mtime).strftime(DISPLAY_DATETIME_FORMAT)
-            except OSError:
-                continue
-        return "-"
+    def _check_updates(self) -> None:
+        self._startup_silent_check = False
+        self._start_update_check()
+
+    def check_updates_silently(self) -> None:
+        self._startup_silent_check = True
+        self._start_update_check()
+
+    def _start_update_check(self) -> None:
+        if self._update_worker and self._update_worker.isRunning():
+            return
+
+        self.update_card.check_button.setEnabled(False)
+        self.update_card.release_button.setEnabled(False)
+        self.update_card.replace_button.setEnabled(False)
+        if not self._startup_silent_check:
+            self.update_card.set_state(
+                "正在检查更新",
+                "正在查询 GitHub Release 中的最新已发布版本。",
+                "仅检查正式 Release，不包含 draft 或 prerelease。",
+            )
+        self._update_worker = UpdateCheckWorker(self._release_checker, self)
+        self._update_worker.succeeded.connect(self._handle_update_success)
+        self._update_worker.failed.connect(self._handle_update_failure)
+        self._update_worker.finished.connect(self._handle_update_finished)
+        self._update_worker.start()
+
+    def _handle_update_success(self, result: object) -> None:
+        if not isinstance(result, UpdateCheckResult):
+            self._handle_update_failure("检查更新失败：返回结果不符合预期")
+            return
+
+        release = result.latest_release
+        self._release_url = release.html_url
+        self._latest_asset = release.asset
+        asset_note = (
+            f"下载文件：{release.asset.name}"
+            if release.asset is not None
+            else "该 Release 未找到匹配的二进制资产，将打开发布页面。"
+        )
+        can_replace = bool(result.update_available and self._binary_update_supported and release.asset is not None)
+        replace_note = ""
+        if can_replace and self._binary_updater is not None:
+            supported, reason = self._binary_updater.can_replace_current_binary()
+            can_replace = supported
+            if reason:
+                replace_note = f"  {reason}"
+        if result.update_available:
+            self.update_card.set_state(
+                f"发现新版本 v{release.version}",
+                f"当前版本 v{result.current_version}，最新版本 v{release.version}。",
+                f"{asset_note}  发布时间：{self._format_release_time(release.published_at)}{replace_note}",
+                can_open_release=True,
+                can_replace=can_replace,
+            )
+            if self._startup_silent_check:
+                InfoBar.info(
+                    title="发现新版本",
+                    content=f"检测到 v{release.version} 可用，可在关于页查看并更新。",
+                    orient=Qt.Orientation.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP_RIGHT,
+                    duration=5000,
+                    parent=self.window(),
+                )
+            return
+
+        is_dev_build = (
+            result.version_comparison < 0
+            or self._build_info.dirty
+            or (
+                bool(release.commit_sha)
+                and self._build_info.commit_sha != "unknown"
+                and self._build_info.commit_sha != release.commit_sha
+            )
+        )
+        if is_dev_build:
+            commit_note = ""
+            if release.commit_sha:
+                commit_note = (
+                    f"  当前 Commit：{self._short_commit(self._build_info.commit_sha)}"
+                    f"  Release Commit：{self._short_commit(release.commit_sha)}"
+                )
+            self._latest_asset = None
+            self.update_card.set_state(
+                "当前是非 Release 的开发版本",
+                f"当前构建与最新 Release 不完全一致。版本：v{result.current_version}，最新 Release：v{release.version}。",
+                f"最新公开标签：{release.tag_name}  发布时间：{self._format_release_time(release.published_at)}{commit_note}",
+                can_open_release=True,
+                can_replace=False,
+            )
+            if self._startup_silent_check:
+                InfoBar.info(
+                    title="当前是开发版本",
+                    content="当前构建与最新 Release 不完全一致，可在关于页查看详情。",
+                    orient=Qt.Orientation.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP_RIGHT,
+                    duration=5000,
+                    parent=self.window(),
+                )
+            return
+
+        self._latest_asset = None
+        self.update_card.set_state(
+            "当前已是最新版本",
+            f"当前版本 v{result.current_version} 已与最新 Release 保持一致。",
+            f"最新标签：{release.tag_name}  发布时间：{self._format_release_time(release.published_at)}",
+            can_open_release=True,
+            can_replace=False,
+        )
+
+    def _handle_update_failure(self, message: str) -> None:
+        self._latest_asset = None
+        if self._startup_silent_check:
+            InfoBar.warning(
+                title="自动检查更新失败",
+                content=message,
+                orient=Qt.Orientation.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+                parent=self.window(),
+            )
+        else:
+            self.update_card.set_state(
+                "检查更新失败",
+                message,
+                "请稍后重试，或手动打开 GitHub Release 页面查看。",
+                can_open_release=True,
+                can_replace=False,
+            )
+            show_error_bar(self.window(), "检查更新失败", message)
+
+    def _handle_update_finished(self) -> None:
+        self.update_card.check_button.setEnabled(True)
+        self.update_card.release_button.setEnabled(True)
+        self._update_worker = None
+        self._startup_silent_check = False
+
+    def _open_release_page(self) -> None:
+        if not self._release_url:
+            return
+        QDesktopServices.openUrl(QUrl(self._release_url))
+
+    def _replace_current_binary(self) -> None:
+        if not self._binary_update_supported or self._binary_updater is None:
+            self._handle_update_failure("当前运行方式不支持直接替换二进制文件")
+            return
+        if self._latest_asset is None:
+            self._handle_update_failure("当前未找到可替换的二进制更新文件")
+            return
+
+        supported, reason = self._binary_updater.can_replace_current_binary()
+        if not supported:
+            self._handle_update_failure(reason or "当前环境不支持替换二进制文件")
+            return
+
+        box = MessageBox(
+            "下载并替换当前二进制",
+            "将下载最新二进制文件，并在你关闭当前程序后替换当前可执行文件。\n"
+            "下载完成后会自动退出当前程序，替换完成后自动重新启动。是否继续？",
+            self.window(),
+        )
+        box.yesButton.setText("继续")
+        box.cancelButton.setText("取消")
+        if not box.exec():
+            return
+
+        try:
+            self.update_card.check_button.setEnabled(False)
+            self.update_card.release_button.setEnabled(False)
+            self.update_card.replace_button.setEnabled(False)
+            self.update_card.set_state(
+                "正在下载更新",
+                f"正在下载 {self._latest_asset.name}。",
+                "下载完成后将自动退出当前程序，替换二进制并重新启动。",
+                can_open_release=False,
+                can_replace=False,
+            )
+            self._install_worker = UpdateInstallWorker(
+                self._binary_updater,
+                self._latest_asset,
+                os.getpid(),
+                self,
+            )
+            self._install_worker.progress_changed.connect(self._handle_install_progress)
+            self._install_worker.succeeded.connect(self._handle_install_success)
+            self._install_worker.failed.connect(self._handle_install_failure)
+            self._install_worker.finished.connect(self._handle_install_finished)
+            self._install_worker.start()
+        except UpdateInstallError as exc:
+            self._handle_update_failure(str(exc))
+            return
+
+    def _handle_install_progress(self, received: int, total: int) -> None:
+        if total > 0:
+            percent = int(received * 100 / total)
+            meta = f"已下载 {self._format_bytes(received)} / {self._format_bytes(total)} ({percent}%)"
+        else:
+            meta = f"已下载 {self._format_bytes(received)}"
+        self.update_card.set_state(
+            "正在下载更新",
+            "下载完成后将自动退出当前程序，替换二进制并重新启动。",
+            meta,
+            can_open_release=False,
+            can_replace=False,
+        )
+
+    def _handle_install_success(self) -> None:
+        self.update_card.set_state(
+            "更新已下载完成",
+            "正在退出当前程序并应用新版本。",
+            f"目标文件：{os.path.basename(sys.executable)}  程序将自动重新启动。",
+            can_open_release=False,
+            can_replace=False,
+        )
+        QTimer.singleShot(300, QApplication.instance().quit)
+
+    def _handle_install_failure(self, message: str) -> None:
+        self.update_card.set_state(
+            "下载更新失败",
+            message,
+            "你仍然可以打开 Release 页面手动下载。",
+            can_open_release=True,
+            can_replace=self._binary_update_supported and self._latest_asset is not None,
+        )
+        show_error_bar(self.window(), "下载更新失败", message)
+
+    def _handle_install_finished(self) -> None:
+        self._install_worker = None
+        if QApplication.instance() is None:
+            return
+        if self._install_worker is None:
+            self.update_card.check_button.setEnabled(True)
+            self.update_card.release_button.setEnabled(True)
+
+    def _format_bytes(self, value: int) -> str:
+        units = ["B", "KB", "MB", "GB"]
+        size = float(value)
+        unit = units[0]
+        for unit in units:
+            if size < 1024 or unit == units[-1]:
+                break
+            size /= 1024
+        return f"{size:.1f} {unit}"
+
+    def _short_commit(self, commit_sha: str) -> str:
+        stripped = commit_sha.strip()
+        if not stripped or stripped == "unknown":
+            return "unknown"
+        return stripped[:8]
+
+    def _format_release_time(self, value: str) -> str:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone().strftime(
+                DISPLAY_DATETIME_FORMAT
+            )
+        except ValueError:
+            return value or "-"
+
+    def _parse_repo(self, url: str) -> tuple[str, str]:
+        parsed = urlparse(url)
+        parts = [part for part in parsed.path.strip("/").split("/") if part]
+        if len(parts) >= 2:
+            return parts[0], parts[1]
+        return "SunAnICB", "open-router-key-viewer"
 
 
 class MainWindow(FluentWindow):
@@ -1869,6 +2314,8 @@ class MainWindow(FluentWindow):
 
     def _run_startup_queries(self) -> None:
         payload = self.config_store.load() or {}
+        if payload.get("auto_check_updates", True):
+            self.about_page.check_updates_silently()
         if payload.get("auto_query_key_info") and payload.get("api_key"):
             self.key_info_page.auto_query_if_possible()
         if payload.get("auto_query_credits") and payload.get("management_key"):

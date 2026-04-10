@@ -4,6 +4,10 @@
 
 ![OpenRouter Key Viewer 截图](assets/screenshots/app-overview.png)
 
+> [!WARNING]
+> 保存后的 `OpenRouter API Key`、`OpenRouter Management Key` 和 `Webhook URL` 会以明文写入本地 `~/.config/open-router-key-viewer/config.json`。
+> 如果设备由多人共用，或你不希望敏感信息落盘，请不要点击保存。
+
 ## 功能
 
 - 查询能力
@@ -71,7 +75,8 @@ QT_QPA_PLATFORM=xcb ./scripts/run.sh
 
 - 软件启动时如果找到配置文件，会自动加载
 - 如果找不到配置文件，不会自动创建
-- key 默认不会自动保存，只有点击保存按钮时才会写入本地
+- key 默认不会自动保存，只有点击保存按钮时才会以明文写入本地
+- `Webhook URL` 等本地配置项同样以明文写入 `config.json`
 - 配置页可以删除 `config.json`，也可以删除整个配置目录
 
 ## 页面

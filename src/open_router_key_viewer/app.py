@@ -132,6 +132,44 @@ class MetricCard(ElevatedCardWidget):
         self.note_label.setText(note)
 
 
+class WarningCard(ElevatedCardWidget):
+    def __init__(self, title: str, message: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("warning-card")
+        self.setStyleSheet(
+            """
+            WarningCard {
+                background-color: rgba(255, 185, 0, 0.14);
+                border: 1px solid rgba(255, 185, 0, 0.42);
+                border-radius: 12px;
+            }
+            """
+        )
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
+
+        icon_label = BodyLabel("\u26a0", self)
+        icon_font = QFont(icon_label.font())
+        icon_font.setPointSize(icon_font.pointSize() + 6)
+        icon_label.setFont(icon_font)
+        layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(4)
+
+        title_label = StrongBodyLabel(title, self)
+        text_layout.addWidget(title_label)
+
+        message_label = BodyLabel(message, self)
+        message_label.setWordWrap(True)
+        text_layout.addWidget(message_label)
+
+        layout.addLayout(text_layout, 1)
+
+
 class ClickablePathLabel(CaptionLabel):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -958,6 +996,14 @@ class CachePage(QWidget):
         root.setSpacing(18)
 
         root.addWidget(TitleLabel("配置", self))
+        root.addWidget(
+            WarningCard(
+                "敏感信息提示",
+                "保存后的 OpenRouter API Key、OpenRouter Management Key 和 Webhook URL 会以明文写入本地 config.json。"
+                " 如果设备由多人共用，请谨慎启用保存功能。",
+                self,
+            )
+        )
 
         summary_card = ElevatedCardWidget(self)
         summary_layout = QGridLayout(summary_card)

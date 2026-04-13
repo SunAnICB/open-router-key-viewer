@@ -1,0 +1,195 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import pytest
+
+import open_router_key_viewer.ui.controllers.update_controller as update_controller_module
+from open_router_key_viewer.services.update_checker import ReleaseAsset, ReleaseInfo, UpdateCheckResult
+from open_router_key_viewer.ui.controllers.update_controller import AboutUpdateController
+
+
+class _FakeSignal:
+    def __init__(self) -> None:
+        self._callbacks = []
+
+    def connect(self, callback) -> None:
+        self._callbacks.append(callback)
+
+
+class _FakeButton:
+    def __init__(self) -> None:
+        self.clicked = _FakeSignal()
+        self.enabled = True
+
+    def setEnabled(self, enabled: bool) -> None:  # noqa: N802
+        self.enabled = enabled
+
+
+class _FakeUpdateCard:
+    def __init__(self) -> None:
+        self.check_button = _FakeButton()
+        self.release_button = _FakeButton()
+        self.replace_button = _FakeButton()
+        self.states: list[dict[str, object]] = []
+        self.retranslated = 0
+
+    def set_state(self, title: str, note: str, meta: str = "", *, can_open_release: bool = False, can_replace: bool = False) -> None:
+        self.states.append(
+            {
+                "title": title,
+                "note": note,
+                "meta": meta,
+                "can_open_release": can_open_release,
+                "can_replace": can_replace,
+            }
+        )
+
+    def retranslate_ui(self) -> None:
+        self.retranslated += 1
+
+
+class _FakeHost:
+    def window(self):
+        return self
+
+
+@dataclass
+class _FakeBuildInfo:
+    commit_sha: str = "abcdef1234567890"
+    dirty: bool = False
+
+
+class _FakeReleaseChecker:
+    def __init__(self, *args, **kwargs) -> None:
+        self.args = args
+        self.kwargs = kwargs
+
+
+class _FakeUpdateWorker:
+    def __init__(self, checker, parent) -> None:
+        self.checker = checker
+        self.parent = parent
+        self.succeeded = _FakeSignal()
+        self.failed = _FakeSignal()
+        self.finished = _FakeSignal()
+        self.started = False
+        self.running = False
+
+    def isRunning(self) -> bool:  # noqa: N802
+        return self.running
+
+    def start(self) -> None:
+        self.started = True
+        self.running = True
+
+
+class _FakeBinaryUpdater:
+    def __init__(self, *args, **kwargs) -> None:
+        self.cleaned = False
+
+    def cleanup_stale_updates(self) -> None:
+        self.cleaned = True
+
+    def can_replace_current_binary(self) -> tuple[bool, str]:
+        return True, ""
+
+
+def _make_controller(
+    monkeypatch: pytest.MonkeyPatch, *, frozen: bool = False
+) -> tuple[AboutUpdateController, _FakeUpdateCard, _FakeHost]:
+    monkeypatch.setattr(update_controller_module, "get_build_info", lambda: _FakeBuildInfo())
+    monkeypatch.setattr(update_controller_module, "GitHubReleaseChecker", _FakeReleaseChecker)
+    monkeypatch.setattr(update_controller_module, "UpdateCheckWorker", _FakeUpdateWorker)
+    monkeypatch.setattr(update_controller_module, "BinaryUpdater", _FakeBinaryUpdater)
+    monkeypatch.setattr(update_controller_module.sys, "frozen", frozen, raising=False)
+    monkeypatch.setattr(update_controller_module.sys, "executable", "/tmp/open-router-key-viewer", raising=False)
+    host = _FakeHost()
+    card = _FakeUpdateCard()
+    controller = AboutUpdateController(host, card)
+    return controller, card, host
+
+
+def test_show_intro_state_for_source_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller, card, _ = _make_controller(monkeypatch, frozen=False)
+
+    assert controller.binary_update_supported is False
+    assert card.states[-1]["title"] == "可检查更新"
+    assert card.states[-1]["can_open_release"] is True
+
+
+def test_start_update_check_disables_buttons_and_starts_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller, card, _ = _make_controller(monkeypatch, frozen=False)
+
+    controller.check_updates()
+
+    assert card.check_button.enabled is False
+    assert card.release_button.enabled is False
+    assert card.replace_button.enabled is False
+    assert card.states[-1]["title"] == "正在检查更新"
+    assert isinstance(controller._update_worker, _FakeUpdateWorker)
+    assert controller._update_worker.started is True
+
+
+def test_handle_update_success_for_available_release_notifies_when_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+    info_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(update_controller_module.InfoBar, "info", lambda **kwargs: info_calls.append(kwargs))
+    controller, card, _ = _make_controller(monkeypatch, frozen=False)
+    controller._startup_silent_check = True
+    release = ReleaseInfo(
+        tag_name="v0.3.1",
+        version="0.3.1",
+        html_url="https://example.com/release",
+        published_at="2026-04-14T12:00:00Z",
+        body="",
+        commit_sha="abcdef1234567890",
+        asset=ReleaseAsset(name="open-router-key-viewer", download_url="https://example.com/bin"),
+    )
+    result = UpdateCheckResult(
+        current_version="0.3.0",
+        latest_release=release,
+        version_comparison=1,
+        update_available=True,
+    )
+
+    controller._handle_update_success(result)
+
+    assert card.states[-1]["title"] == "发现新版本 v0.3.1"
+    assert card.states[-1]["can_open_release"] is True
+    assert card.states[-1]["can_replace"] is False
+    assert info_calls and info_calls[-1]["title"] == "发现新版本"
+
+
+def test_handle_update_success_marks_latest_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller, card, _ = _make_controller(monkeypatch, frozen=False)
+    release = ReleaseInfo(
+        tag_name="v0.3.0",
+        version="0.3.0",
+        html_url="https://example.com/release",
+        published_at="2026-04-14T12:00:00Z",
+        body="",
+        commit_sha="abcdef1234567890",
+        asset=None,
+    )
+    result = UpdateCheckResult(
+        current_version="0.3.0",
+        latest_release=release,
+        version_comparison=0,
+        update_available=False,
+    )
+
+    controller._handle_update_success(result)
+
+    assert card.states[-1]["title"] == "当前已是最新版本"
+    assert card.states[-1]["can_replace"] is False
+
+
+def test_handle_update_failure_uses_error_bar_when_not_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+    errors: list[tuple[object, str, str]] = []
+    monkeypatch.setattr(update_controller_module, "show_error_bar", lambda parent, title, message: errors.append((parent, title, message)))
+    controller, card, host = _make_controller(monkeypatch, frozen=False)
+
+    controller._handle_update_failure("boom")
+
+    assert card.states[-1]["title"] == "检查更新失败"
+    assert errors == [(host, "检查更新失败", "boom")]

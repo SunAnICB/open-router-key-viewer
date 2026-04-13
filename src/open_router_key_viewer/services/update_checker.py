@@ -240,7 +240,7 @@ class BinaryUpdater:
         self._download_asset(asset.download_url, downloaded_path, progress_callback=progress_callback)
         downloaded_path.chmod(0o755)
         script_path.write_text(
-            self._replacement_script(downloaded_path, self.current_binary),
+            self._replacement_script(downloaded_path, self.current_binary, temp_dir),
             encoding="utf-8",
         )
         script_path.chmod(0o755)
@@ -299,20 +299,51 @@ class BinaryUpdater:
         except OSError as exc:
             raise UpdateInstallError(f"写入更新文件失败：{exc}") from exc
 
-    def _replacement_script(self, downloaded_path: Path, target_path: Path) -> str:
+    def _replacement_script(self, downloaded_path: Path, target_path: Path, update_dir: Path) -> str:
         escaped_downloaded = _shell_quote(str(downloaded_path))
         escaped_target = _shell_quote(str(target_path))
-        escaped_dir = _shell_quote(str(downloaded_path.parent))
+        escaped_target_dir = _shell_quote(str(target_path.parent))
+        escaped_update_dir = _shell_quote(str(update_dir))
+        escaped_script_log = _shell_quote(str(update_dir / "apply-update.log"))
+        escaped_app_log = _shell_quote(str(update_dir / "relaunch.log"))
         return f"""#!/bin/sh
 set -eu
 PID="$1"
+SCRIPT_LOG={escaped_script_log}
+APP_LOG={escaped_app_log}
+TARGET={escaped_target}
+TARGET_DIR={escaped_target_dir}
+DOWNLOADED={escaped_downloaded}
+UPDATE_DIR={escaped_update_dir}
+
+log() {{
+  printf '%s %s\\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >>"$SCRIPT_LOG"
+}}
+
+mkdir -p "$UPDATE_DIR"
+touch "$SCRIPT_LOG" "$APP_LOG"
+log "Waiting for process $PID to exit"
 while kill -0 "$PID" 2>/dev/null; do
   sleep 1
 done
-chmod +x {escaped_downloaded}
-mv {escaped_downloaded} {escaped_target}
-{escaped_target} >/dev/null 2>&1 &
-rm -rf {escaped_dir}
+log "Replacing binary"
+chmod +x "$DOWNLOADED"
+mv "$DOWNLOADED" "$TARGET"
+chmod +x "$TARGET"
+cd "$TARGET_DIR"
+
+log "Launching updated application"
+nohup "$TARGET" >>"$APP_LOG" 2>&1 &
+NEW_PID=$!
+
+sleep 2
+if kill -0 "$NEW_PID" 2>/dev/null; then
+  log "Relaunch succeeded with pid $NEW_PID"
+  exit 0
+fi
+
+log "Relaunch failed; see $APP_LOG"
+exit 1
 """
 
 

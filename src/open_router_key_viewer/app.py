@@ -110,6 +110,15 @@ def show_error_bar(parent: QWidget, title: str, message: str) -> None:
     )
 
 
+def stop_thread(thread: QThread | None, timeout_ms: int = 3000) -> None:
+    if thread is None or not thread.isRunning():
+        return
+    if thread.wait(timeout_ms):
+        return
+    thread.terminate()
+    thread.wait(1000)
+
+
 class QueryWorker(QThread):
     succeeded = Signal(dict)
     failed = Signal(str)
@@ -1063,8 +1072,7 @@ class BaseQueryPage(QWidget):
         return format_currency_value(value)
 
     def stop_worker(self) -> None:
-        if self._worker and self._worker.isRunning():
-            self._worker.wait(3000)
+        stop_thread(self._worker)
 
 
 class KeyInfoPage(BaseQueryPage):
@@ -2455,6 +2463,10 @@ class AboutPage(QWidget):
             return parts[0], parts[1]
         return "SunAnICB", "open-router-key-viewer"
 
+    def stop_workers(self) -> None:
+        stop_thread(self._update_worker)
+        stop_thread(self._install_worker)
+
 
 class MainWindow(FluentWindow):
     def __init__(self) -> None:
@@ -2970,6 +2982,7 @@ class MainWindow(FluentWindow):
             self._panel_label_timer.stop()
         self.key_info_page.stop_worker()
         self.credits_page.stop_worker()
+        self.about_page.stop_workers()
         if self.floating_window is not None:
             self.floating_window.blockSignals(True)
             self.floating_window.close_for_shutdown()

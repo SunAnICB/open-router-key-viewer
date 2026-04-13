@@ -80,6 +80,11 @@ APP_DATA_SOURCE_URL = "https://openrouter.ai/docs/api-reference/overview"
 DISPLAY_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 BINARY_ASSET_NAME = "open-router-key-viewer"
 _tr = tr
+DISPLAY_BACKEND_OPTIONS: list[tuple[str, str]] = [
+    ("auto", "自动"),
+    ("wayland", "Wayland"),
+    ("x11", "X11"),
+]
 
 
 def format_currency_value(value: object) -> str:
@@ -1235,6 +1240,12 @@ class CachePage(QWidget):
         header.setSpacing(12)
         header.addWidget(TitleLabel(_tr("配置"), self))
         header.addStretch(1)
+        header.addWidget(CaptionLabel(_tr("显示后端"), self))
+        self.display_backend_combo = ComboBox(self)
+        for code, label in DISPLAY_BACKEND_OPTIONS:
+            self.display_backend_combo.addItem(_tr(label), userData=code)
+        self.display_backend_combo.currentIndexChanged.connect(self._handle_display_backend_changed)
+        header.addWidget(self.display_backend_combo)
         header.addWidget(CaptionLabel(_tr("界面语言"), self))
         self.language_combo = ComboBox(self)
         for code, label in LANGUAGE_OPTIONS:
@@ -1543,6 +1554,7 @@ class CachePage(QWidget):
         loaded_config = snapshot.get("loaded_config")
         payload = loaded_config if isinstance(loaded_config, dict) else {}
         language_code = resolve_language_code(payload.get("ui_language"))
+        display_backend = self._resolve_display_backend(payload.get("display_backend"))
         files = snapshot.get("files", [])
         file_count = sum(1 for item in files if item.get("type") == "file")
         entry_count = len(payload)
@@ -1565,6 +1577,7 @@ class CachePage(QWidget):
         self.status_label.setText(
             _tr("已解析本地缓存") if snapshot["config_exists"] else _tr("未找到配置文件")
         )
+        self._sync_display_backend_combo(display_backend)
         self._sync_language_combo(language_code)
         self._sync_auto_query_row(
             self.auto_key_row,
@@ -1617,6 +1630,42 @@ class CachePage(QWidget):
         self.content_output.setPlainText(self._file_text)
         self._show_mode(self._mode)
 
+    def _resolve_display_backend(self, value: object) -> str:
+        if isinstance(value, str) and value in {code for code, _ in DISPLAY_BACKEND_OPTIONS}:
+            return value
+        return "auto"
+
+    def _sync_display_backend_combo(self, backend: str) -> None:
+        index = self.display_backend_combo.findData(backend)
+        if index < 0:
+            index = 0
+        self.display_backend_combo.blockSignals(True)
+        self.display_backend_combo.setCurrentIndex(index)
+        self.display_backend_combo.blockSignals(False)
+
+    def _handle_display_backend_changed(self, index: int) -> None:
+        _ = index
+        backend = self.display_backend_combo.currentData()
+        if not isinstance(backend, str):
+            return
+        current_backend = self._resolve_display_backend((self.config_store.load() or {}).get("display_backend"))
+        if backend == current_backend:
+            return
+        if backend == "auto":
+            self.config_store.delete_value("display_backend")
+        else:
+            self.config_store.save_value("display_backend", backend)
+        InfoBar.success(
+            title=_tr("已保存"),
+            content=_tr("显示后端已更新，重启后生效"),
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3000,
+            parent=self.window(),
+        )
+        self.on_cache_changed()
+
     def _sync_language_combo(self, language_code: str) -> None:
         index = self.language_combo.findData(language_code)
         if index < 0:
@@ -1647,6 +1696,7 @@ class CachePage(QWidget):
         mapping = {
             "api_key": "OpenRouter API Key",
             "management_key": "OpenRouter Management Key",
+            "display_backend": "显示后端",
             "ui_language": "界面语言",
             "auto_check_updates": "启动时自动检查更新",
             "auto_query_key_info": "启动时自动查询 Key 配额",
@@ -1684,6 +1734,9 @@ class CachePage(QWidget):
     def _display_config_value(self, key: str, value: object) -> str:
         if key == "ui_language" and isinstance(value, str):
             label_map = {code: label for code, label in LANGUAGE_OPTIONS}
+            return label_map.get(value, value)
+        if key == "display_backend" and isinstance(value, str):
+            label_map = {code: _tr(label) for code, label in DISPLAY_BACKEND_OPTIONS}
             return label_map.get(value, value)
         return str(value)
 

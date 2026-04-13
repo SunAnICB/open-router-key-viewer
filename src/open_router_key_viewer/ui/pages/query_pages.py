@@ -20,13 +20,12 @@ with redirect_stdout(io.StringIO()):
 
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.config_store import ConfigStore
+from open_router_key_viewer.ui.controllers.query_controller import QueryExecutionController
 from open_router_key_viewer.ui.pages.query_widgets import QueryResultCard, SecretInputCard
 from open_router_key_viewer.ui.runtime import (
     DISPLAY_DATETIME_FORMAT,
-    QueryWorker,
     format_currency_value,
     show_error_bar,
-    stop_thread,
 )
 
 _tr = tr
@@ -54,12 +53,19 @@ class BaseQueryPage(QWidget):
         self.config_store = config_store
         self.on_cache_changed = on_cache_changed
         self.on_query_success = on_query_success
-        self._worker: QueryWorker | None = None
         self._summary_payload: dict[str, object] = {}
         self._http_meta: dict[str, object] = {}
         self._raw_payload: dict[str, object] = {}
         self._last_success_time = "-"
         self._status_message = _tr("等待查询")
+        self.query_controller = QueryExecutionController(
+            self.mode,
+            self,
+            on_started=self._handle_query_started,
+            on_succeeded=self._handle_success,
+            on_failed=self._handle_failure,
+            on_finished=self._handle_finished,
+        )
         self._build_ui()
         self.load_cached_secret()
 
@@ -203,10 +209,13 @@ class BaseQueryPage(QWidget):
         )
 
     def _run_query(self, mode: str, secret: str) -> None:
-        if self._worker and self._worker.isRunning():
+        _ = mode
+        if self.query_controller.is_running():
             self._show_error(_tr("已有请求正在执行，请稍候"))
             return
+        self.query_controller.run(secret)
 
+    def _handle_query_started(self) -> None:
         self._set_busy(True, _tr("查询中..."))
         self.status_badge.set_status("loading", _tr("查询中"))
         self._summary_payload = {}
@@ -214,12 +223,6 @@ class BaseQueryPage(QWidget):
         self._raw_payload = {}
         self._render_summary_placeholder(_tr("查询中..."))
         self.result_output.setPlainText("{\n  \"loading\": true\n}")
-
-        self._worker = QueryWorker(mode, secret, self)
-        self._worker.succeeded.connect(self._handle_success)
-        self._worker.failed.connect(self._handle_failure)
-        self._worker.finished.connect(self._handle_finished)
-        self._worker.start()
 
     def _handle_success(self, payload: dict) -> None:
         self._last_success_time = datetime.now().strftime(DISPLAY_DATETIME_FORMAT)
@@ -266,7 +269,6 @@ class BaseQueryPage(QWidget):
 
     def _handle_finished(self) -> None:
         self._set_busy(False, self.status_badge.title_label.text())
-        self._worker = None
 
     def _show_error(self, message: str) -> None:
         show_error_bar(self.window(), _tr("请求失败"), message)
@@ -321,7 +323,7 @@ class BaseQueryPage(QWidget):
         secret = self.secret_input.text().strip()
         if not secret:
             return
-        if self._worker and self._worker.isRunning():
+        if self.query_controller.is_running():
             return
         self._run_query(self.mode, secret)
 
@@ -335,7 +337,7 @@ class BaseQueryPage(QWidget):
         return format_currency_value(value)
 
     def stop_worker(self) -> None:
-        stop_thread(self._worker)
+        self.query_controller.stop()
 
 
 class KeyInfoPage(BaseQueryPage):

@@ -213,7 +213,7 @@ class CachePage(QWidget):
         text_layout.setSpacing(4)
         text_layout.addWidget(StrongBodyLabel(_tr("运行行为"), card))
         hint = CaptionLabel(
-            _tr("单实例用于阻止重复启动；后台驻留可单独决定是否在点击右上角关闭后继续留在后台。"),
+            _tr("单实例用于阻止重复启动；“关闭窗口时驻留后台”仅在启用单实例模式后可用。"),
             card,
         )
         hint.setWordWrap(True)
@@ -419,6 +419,7 @@ class CachePage(QWidget):
             (self.webhook_credits_only_critical_row, bool(payload.get("notify_webhook_credits_only_critical", True))),
         ):
             row.sync_state(value)
+        self._sync_runtime_option_state(bool(payload.get("single_instance_enabled", False)))
 
         for row, value in (
             (self.key_warning_row, payload.get("key_info_warning_threshold", 5.0)),
@@ -582,7 +583,13 @@ class CachePage(QWidget):
 
     def _toggle_switch_value(self, config_key: str, checked: bool) -> None:
         self.config_store.save_flag(config_key, checked)
+        if config_key == "single_instance_enabled":
+            self._sync_runtime_option_state(checked)
         self.on_cache_changed()
+
+    def _sync_runtime_option_state(self, single_instance_enabled: bool) -> None:
+        self.background_resident_row.setEnabled(single_instance_enabled)
+        self.background_resident_row.setToolTip("" if single_instance_enabled else _tr("需先启用单实例模式"))
 
     def _save_input_value(self, config_key: str, raw_value: str) -> None:
         if not raw_value:

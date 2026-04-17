@@ -1,6 +1,6 @@
 [project]
 name = "open-router-key-viewer"
-version = "0.4.0"
+version = "0.5.0"
 description = "Desktop viewer for OpenRouter key quota and account credits."
 readme = "README.md"
 requires-python = ">=3.11"

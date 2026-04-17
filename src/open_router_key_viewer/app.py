@@ -20,6 +20,7 @@ with redirect_stdout(io.StringIO()):
 from open_router_key_viewer import __version__
 from open_router_key_viewer.i18n import resolve_language_code, tr
 from open_router_key_viewer.services.config_store import ConfigStore
+from open_router_key_viewer.services.single_instance import SingleInstanceManager
 from open_router_key_viewer.ui.controllers.shell_controller import WindowShellController
 from open_router_key_viewer.ui.pages.about_page import AboutPage
 from open_router_key_viewer.ui.pages.query_pages import CreditsPage, KeyInfoPage
@@ -33,6 +34,7 @@ class MainWindow(FluentWindow):
     def __init__(self) -> None:
         super().__init__()
         self.config_store = ConfigStore()
+        self._shutting_down = False
         self.key_timer = QTimer(self)
         self.key_timer.timeout.connect(self.key_info_page_auto_query)
         self.credits_timer = QTimer(self)
@@ -64,8 +66,8 @@ class MainWindow(FluentWindow):
             config_store=self.config_store,
             key_info_page=self.key_info_page,
             credits_page=self.credits_page,
-            show_full_window=self._show_full_window,
             refresh_floating_metrics=self.refresh_floating_metrics,
+            quit_application=self.quit_application,
         )
         self.cache_page.floating_window_supported = self.shell_controller.floating_window_supported
         self.cache_page.indicator_available = self.shell_controller.indicator_available
@@ -174,13 +176,35 @@ class MainWindow(FluentWindow):
     def _show_floating_window(self) -> None:
         self.shell_controller.show_floating_window()
 
-    def _show_full_window(self) -> None:
+    def present_window(self) -> None:
         self.shell_controller.show_full_window()
+        restored_state = (self.windowState() & ~Qt.WindowState.WindowMinimized) | Qt.WindowState.WindowActive
+        self.setWindowState(restored_state)
+
+    def quit_application(self) -> None:
+        self._shutting_down = True
+        QApplication.instance().quit()
+
+    def _single_instance_enabled(self) -> bool:
+        payload = self.config_store.load() or {}
+        return bool(payload.get("single_instance_enabled", False))
+
+    def _background_resident_on_close_enabled(self) -> bool:
+        payload = self.config_store.load() or {}
+        return bool(payload.get("background_resident_on_close", False))
 
     def handle_query_success(self, mode: str, payload: dict[str, object]) -> None:
         self.shell_controller.handle_query_success(mode, payload)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if (
+            not self._shutting_down
+            and self._single_instance_enabled()
+            and self._background_resident_on_close_enabled()
+        ):
+            if self.shell_controller.hide_to_background():
+                event.ignore()
+                return
         self.key_timer.stop()
         self.credits_timer.stop()
         self.key_info_page.stop_worker()
@@ -195,11 +219,22 @@ def main() -> int:
     app = QApplication(sys.argv)
     config_store = ConfigStore()
     payload = config_store.load() or {}
+    single_instance_manager: SingleInstanceManager | None = None
+    if payload.get("single_instance_enabled"):
+        single_instance_manager = SingleInstanceManager(parent=app)
+        if not single_instance_manager.start_or_activate_existing():
+            return 0
     install_language(app, resolve_language_code(payload.get("ui_language")))
     app.setApplicationName(APP_DISPLAY_NAME)
     app.setApplicationVersion(__version__)
     setThemeColor("#0F6CBD")
 
     window = MainWindow()
+    if single_instance_manager is not None:
+        single_instance_manager.activation_requested.connect(window.present_window)
     window.show()
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        if single_instance_manager is not None:
+            single_instance_manager.close()

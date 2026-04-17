@@ -142,6 +142,7 @@ class CachePage(QWidget):
         root.addWidget(summary_card)
 
         root.addWidget(self._build_floating_card())
+        root.addWidget(self._build_runtime_card())
         root.addWidget(self._build_indicator_card())
         root.addWidget(self._build_auto_query_card())
         root.addWidget(self._build_alerts_card())
@@ -199,6 +200,34 @@ class CachePage(QWidget):
         self.indicator_switch_row = self._create_switch_row(_tr("启用顶栏指示器"), "panel_indicator_enabled", card)
         self.indicator_switch_row.setEnabled(self.indicator_available)
         layout.addWidget(self.indicator_switch_row)
+        return card
+
+    def _build_runtime_card(self) -> QWidget:
+        card = ElevatedCardWidget(self)
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(12)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(4)
+        text_layout.addWidget(StrongBodyLabel(_tr("运行行为"), card))
+        hint = CaptionLabel(
+            _tr("单实例用于阻止重复启动；后台驻留可单独决定是否在点击右上角关闭后继续留在后台。"),
+            card,
+        )
+        hint.setWordWrap(True)
+        text_layout.addWidget(hint)
+        layout.addLayout(text_layout, 1)
+
+        switches = QVBoxLayout()
+        switches.setContentsMargins(0, 0, 0, 0)
+        switches.setSpacing(8)
+        self.single_instance_row = self._create_switch_row(_tr("启用单实例模式"), "single_instance_enabled", card)
+        self.background_resident_row = self._create_switch_row(_tr("关闭窗口时驻留后台"), "background_resident_on_close", card)
+        switches.addWidget(self.single_instance_row)
+        switches.addWidget(self.background_resident_row)
+        layout.addLayout(switches)
         return card
 
     def _build_auto_query_card(self) -> QWidget:
@@ -379,6 +408,8 @@ class CachePage(QWidget):
         )
         for row, value in (
             (self.auto_update_row, bool(payload.get("auto_check_updates", True))),
+            (self.single_instance_row, bool(payload.get("single_instance_enabled", False))),
+            (self.background_resident_row, bool(payload.get("background_resident_on_close", False))),
             (self.indicator_switch_row, bool(payload.get("panel_indicator_enabled", False))),
             (self.notify_in_app_row, bool(payload.get("notify_in_app", True))),
             (self.notify_system_row, bool(payload.get("notify_system", True))),
@@ -472,6 +503,8 @@ class CachePage(QWidget):
             "management_key": "OpenRouter Management Key",
             "display_backend": "显示后端",
             "ui_language": "界面语言",
+            "single_instance_enabled": "启用单实例模式",
+            "background_resident_on_close": "关闭窗口时驻留后台",
             "auto_check_updates": "启动时自动检查更新",
             "auto_query_key_info": "启动时自动查询 Key 配额",
             "auto_query_credits": "启动时自动查询账户余额",

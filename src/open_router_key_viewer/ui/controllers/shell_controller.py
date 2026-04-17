@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QGuiApplication, QIcon
-from PySide6.QtWidgets import QApplication, QStyle, QSystemTrayIcon, QWidget
+from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon, QWidget
 
 with redirect_stdout(io.StringIO()):
     from qfluentwidgets import InfoBar, InfoBarPosition
@@ -41,15 +41,15 @@ class WindowShellController:
         config_store: ConfigStore,
         key_info_page: BaseQueryPage,
         credits_page: BaseQueryPage,
-        show_full_window: Callable[[], None],
         refresh_floating_metrics: Callable[[], None],
+        quit_application: Callable[[], None],
     ) -> None:
         self.host = host
         self.config_store = config_store
         self.key_info_page = key_info_page
         self.credits_page = credits_page
-        self._show_full_window_callback = show_full_window
         self._refresh_floating_metrics_callback = refresh_floating_metrics
+        self._quit_application_callback = quit_application
         self._floating_window_supported = self._is_x11_platform()
         self._indicator_available = self._check_indicator_available()
         self._alert_state = {"key-info": "normal", "credits": "normal"}
@@ -57,6 +57,7 @@ class WindowShellController:
         self._sni_tray: SNITray | None = None  # type: ignore[assignment]
         self._panel_label_timer: QTimer | None = None
         self._panel_label_phase = 0
+        self._background_hint_shown = False
         self._floating_key_value = "-"
         self._floating_key_time = "-"
         self._floating_credits_value = "-"
@@ -80,7 +81,7 @@ class WindowShellController:
                 activate=self.show_full_window,
                 refresh=self._refresh_floating_metrics_callback,
                 show_window=self.show_full_window,
-                quit=lambda: QApplication.instance().quit(),
+                quit=self._quit_application_callback,
             )
             if sni.register():
                 self._sni_tray = sni
@@ -99,7 +100,7 @@ class WindowShellController:
                     activate=self.show_full_window,
                     refresh=self._refresh_floating_metrics_callback,
                     show_window=self.show_full_window,
-                    quit=lambda: QApplication.instance().quit(),
+                    quit=self._quit_application_callback,
                 )
                 if sni.register():
                     self._sni_tray = sni
@@ -157,8 +158,28 @@ class WindowShellController:
         if self.floating_window is not None:
             self.floating_window.hide()
         self.host.show()
+        self.host.showNormal()
         self.host.raise_()
         self.host.activateWindow()
+
+    def hide_to_background(self) -> bool:
+        has_indicator = self._sni_tray is not None and self._sni_tray.is_active
+        has_tray = self._tray_icon is not None and self._tray_icon.isVisible()
+        if not has_indicator and not has_tray:
+            return False
+
+        if self.floating_window is not None:
+            self.floating_window.hide()
+        self.host.hide()
+        if has_tray and not self._background_hint_shown:
+            self._tray_icon.showMessage(
+                APP_DISPLAY_NAME,
+                _tr("应用已驻留后台，可从托盘图标恢复或退出。"),
+                QSystemTrayIcon.MessageIcon.Information,
+                3000,
+            )
+        self._background_hint_shown = True
+        return True
 
     def handle_query_success(self, mode: str, payload: dict[str, object]) -> None:
         summary = payload.get("summary", {})
@@ -377,8 +398,25 @@ class WindowShellController:
         QApplication.instance().setWindowIcon(icon)
         tray_icon.setIcon(icon)
         tray_icon.setToolTip(APP_DISPLAY_NAME)
+        menu = QMenu(self.host)
+        open_action = menu.addAction(_tr("显示主窗口"))
+        open_action.triggered.connect(self.show_full_window)
+        refresh_action = menu.addAction(_tr("刷新"))
+        refresh_action.triggered.connect(self._refresh_floating_metrics_callback)
+        menu.addSeparator()
+        quit_action = menu.addAction(_tr("退出"))
+        quit_action.triggered.connect(self._quit_application_callback)
+        tray_icon.setContextMenu(menu)
+        tray_icon.activated.connect(self._handle_tray_icon_activated)
         tray_icon.show()
         self._tray_icon = tray_icon
+
+    def _handle_tray_icon_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
+            self.show_full_window()
 
     def _load_app_icon(self) -> QIcon:
         base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3]))

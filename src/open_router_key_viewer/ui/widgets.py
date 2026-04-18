@@ -173,6 +173,74 @@ class UpdateCard(ElevatedCardWidget):
         self.replace_button.setText(_tr("下载并替换"))
 
 
+class InstallCard(ElevatedCardWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(12)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(12)
+        self.header_label = StrongBodyLabel(_tr("安装"), self)
+        header.addWidget(self.header_label)
+        header.addStretch(1)
+
+        self.install_button = PrimaryPushButton(_tr("安装到目录"), self)
+        header.addWidget(self.install_button)
+
+        self.open_button = PushButton(_tr("打开目录"), self)
+        self.open_button.setVisible(False)
+        self.open_button.setEnabled(False)
+        header.addWidget(self.open_button)
+
+        self.remove_button = PushButton(_tr("移除安装"), self)
+        self.remove_button.setVisible(False)
+        self.remove_button.setEnabled(False)
+        header.addWidget(self.remove_button)
+        layout.addLayout(header)
+
+        self.status_label = TitleLabel("-", self)
+        layout.addWidget(self.status_label)
+
+        self.note_label = BodyLabel("", self)
+        self.note_label.setWordWrap(True)
+        layout.addWidget(self.note_label)
+
+        self.meta_label = CaptionLabel("", self)
+        self.meta_label.setWordWrap(True)
+        layout.addWidget(self.meta_label)
+
+    def set_state(
+        self,
+        title: str,
+        note: str,
+        meta: str = "",
+        *,
+        can_open_directory: bool = False,
+        can_remove: bool = False,
+        install_button_text: str | None = None,
+        install_enabled: bool = True,
+    ) -> None:
+        self.status_label.setText(title)
+        self.note_label.setText(note)
+        self.meta_label.setText(meta)
+        self.open_button.setVisible(can_open_directory)
+        self.open_button.setEnabled(can_open_directory)
+        self.remove_button.setVisible(can_remove)
+        self.remove_button.setEnabled(can_remove)
+        self.install_button.setEnabled(install_enabled)
+        if install_button_text is not None:
+            self.install_button.setText(install_button_text)
+
+    def retranslate_ui(self) -> None:
+        self.header_label.setText(_tr("安装"))
+        self.install_button.setText(_tr("安装到固定位置"))
+        self.open_button.setText(_tr("打开目录"))
+        self.remove_button.setText(_tr("移除安装"))
+
+
 class ClickablePathLabel(CaptionLabel):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -534,4 +602,3 @@ class FloatingWindow(QWidget):
     def close_for_shutdown(self) -> None:
         self._allow_close = True
         self.close()
-

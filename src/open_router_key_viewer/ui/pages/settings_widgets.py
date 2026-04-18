@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 with redirect_stdout(io.StringIO()):
-    from qfluentwidgets import CaptionLabel, LineEdit, PushButton, StrongBodyLabel, SwitchButton
+    from qfluentwidgets import CaptionLabel, LineEdit, PushButton, StrongBodyLabel, SwitchButton, isDarkTheme
 
 from open_router_key_viewer.i18n import tr
 
@@ -170,7 +170,8 @@ class PropertyRowsPanel(QWidget):
 
             if note:
                 note_widget = CaptionLabel(note, row)
-                note_widget.setStyleSheet("color: rgba(0, 0, 0, 0.62);")
+                note_color = "rgba(255, 255, 255, 0.72)" if isDarkTheme() else "rgba(0, 0, 0, 0.62)"
+                note_widget.setStyleSheet(f"color: {note_color};")
                 note_widget.setMinimumWidth(180)
                 row_layout.addWidget(note_widget, 1)
 

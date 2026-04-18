@@ -15,6 +15,7 @@ with redirect_stdout(io.StringIO()):
         ElevatedCardWidget,
         FluentIcon,
         HyperlinkButton,
+        isDarkTheme,
         PrimaryPushButton,
         PushButton,
         StrongBodyLabel,
@@ -375,7 +376,8 @@ class DetailCard(ElevatedCardWidget):
             if note:
                 note_label = CaptionLabel(note, row)
                 note_label.setWordWrap(False)
-                note_label.setStyleSheet("color: rgba(0, 0, 0, 0.62);")
+                note_color = "rgba(255, 255, 255, 0.72)" if isDarkTheme() else "rgba(0, 0, 0, 0.62)"
+                note_label.setStyleSheet(f"color: {note_color};")
                 note_label.setMinimumWidth(220)
                 top_row.addWidget(note_label, 1)
             else:
@@ -411,16 +413,26 @@ class StatusBadge(QWidget):
         self.kind = kind
         self.title_label.setText(title)
 
-        styles = {
-            "idle": ("#F3F7FB", "#D7E3F1", "#16324F"),
-            "loading": ("#FFF7E8", "#F3D19C", "#6B4F00"),
-            "success": ("#EAF7EF", "#A9D8B8", "#0E4F2F"),
-            "error": ("#FDEEEE", "#E7A6A6", "#7A1F1F"),
-        }
+        styles = (
+            {
+                "idle": ("rgba(255, 255, 255, 0.10)", "rgba(255, 255, 255, 0.18)", "#F5F7FA"),
+                "loading": ("rgba(255, 185, 0, 0.18)", "rgba(255, 185, 0, 0.30)", "#FFD98A"),
+                "success": ("rgba(15, 123, 71, 0.22)", "rgba(15, 123, 71, 0.36)", "#9DE5BC"),
+                "error": ("rgba(196, 43, 28, 0.22)", "rgba(196, 43, 28, 0.36)", "#FFB3AD"),
+            }
+            if isDarkTheme()
+            else {
+                "idle": ("#F3F7FB", "#D7E3F1", "#16324F"),
+                "loading": ("#FFF7E8", "#F3D19C", "#6B4F00"),
+                "success": ("#EAF7EF", "#A9D8B8", "#0E4F2F"),
+                "error": ("#FDEEEE", "#E7A6A6", "#7A1F1F"),
+            }
+        )
         bg, border, text = styles.get(kind, styles["idle"])
         self.setStyleSheet(
             "QWidget {"
             f"background-color: {bg};"
+            f"border: 1px solid {border};"
             "border-radius: 999px;"
             "}"
             f"QLabel {{ color: {text}; background: transparent; }}"

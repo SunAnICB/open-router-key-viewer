@@ -34,7 +34,7 @@ from open_router_key_viewer.ui.pages.settings_widgets import (
     PropertyRowsPanel,
     SwitchSettingRow,
 )
-from open_router_key_viewer.ui.runtime import DISPLAY_BACKEND_OPTIONS, show_error_bar
+from open_router_key_viewer.ui.runtime import THEME_MODE_OPTIONS, DISPLAY_BACKEND_OPTIONS, resolve_theme_mode, show_error_bar
 from open_router_key_viewer.ui.widgets import MetricCard, PathActionCard, WarningCard
 
 _tr = tr
@@ -46,6 +46,7 @@ class CachePage(QWidget):
         config_store: ConfigStore,
         on_cache_changed: Callable[[], None],
         on_language_changed: Callable[[str], None],
+        on_theme_changed: Callable[[str], None],
         on_open_floating_window: Callable[[], None],
         floating_window_supported: bool,
         indicator_available: bool,
@@ -56,6 +57,7 @@ class CachePage(QWidget):
         self.config_store = config_store
         self.on_cache_changed = on_cache_changed
         self.on_language_changed = on_language_changed
+        self.on_theme_changed = on_theme_changed
         self.on_open_floating_window = on_open_floating_window
         self.floating_window_supported = floating_window_supported
         self.indicator_available = indicator_available
@@ -76,11 +78,12 @@ class CachePage(QWidget):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll_area.enableTransparentBackground()
         outer.addWidget(self.scroll_area)
 
         content = QWidget(self.scroll_area)
         self.scroll_area.setWidget(content)
+        self.scroll_area.enableTransparentBackground()
+        content.setStyleSheet("background: transparent;")
 
         root = QVBoxLayout(content)
         root.setContentsMargins(36, 28, 36, 36)
@@ -102,6 +105,12 @@ class CachePage(QWidget):
             self.language_combo.addItem(label, userData=code)
         self.language_combo.currentIndexChanged.connect(self._handle_language_changed)
         header.addWidget(self.language_combo)
+        header.addWidget(CaptionLabel(_tr("主题模式"), self))
+        self.theme_mode_combo = ComboBox(self)
+        for code, label in THEME_MODE_OPTIONS:
+            self.theme_mode_combo.addItem(_tr(label), userData=code)
+        self.theme_mode_combo.currentIndexChanged.connect(self._handle_theme_mode_changed)
+        header.addWidget(self.theme_mode_combo)
         root.addLayout(header)
 
         root.addWidget(
@@ -374,6 +383,7 @@ class CachePage(QWidget):
         payload = loaded_config if isinstance(loaded_config, dict) else {}
         language_code = resolve_language_code(payload.get("ui_language"))
         display_backend = self._resolve_display_backend(payload.get("display_backend"))
+        theme_mode = resolve_theme_mode(payload.get("theme_mode"))
         files = snapshot.get("files", [])
         file_count = sum(1 for item in files if item.get("type") == "file")
         entry_count = len(payload)
@@ -396,6 +406,7 @@ class CachePage(QWidget):
         self.status_label.setText(_tr("已解析本地缓存") if snapshot["config_exists"] else _tr("未找到配置文件"))
         self._sync_display_backend_combo(display_backend)
         self._sync_language_combo(language_code)
+        self._sync_theme_mode_combo(theme_mode)
         self.auto_key_row.sync_state(
             bool(payload.get("auto_query_key_info", False)),
             bool(payload.get("poll_key_info_enabled", False)),
@@ -491,6 +502,28 @@ class CachePage(QWidget):
         self.config_store.save_value("ui_language", language_code)
         self.on_language_changed(language_code)
 
+    def _sync_theme_mode_combo(self, theme_mode: str) -> None:
+        index = self.theme_mode_combo.findData(theme_mode)
+        if index < 0:
+            index = 0
+        self.theme_mode_combo.blockSignals(True)
+        self.theme_mode_combo.setCurrentIndex(index)
+        self.theme_mode_combo.blockSignals(False)
+
+    def _handle_theme_mode_changed(self, index: int) -> None:
+        _ = index
+        theme_mode = self.theme_mode_combo.currentData()
+        if not isinstance(theme_mode, str):
+            return
+        current_theme_mode = resolve_theme_mode((self.config_store.load() or {}).get("theme_mode"))
+        if theme_mode == current_theme_mode:
+            return
+        if theme_mode == "auto":
+            self.config_store.delete_value("theme_mode")
+        else:
+            self.config_store.save_value("theme_mode", theme_mode)
+        self.on_theme_changed(theme_mode)
+
     def _show_mode(self, mode: str) -> None:
         self._mode = mode
         showing_data = mode == "data"
@@ -504,6 +537,7 @@ class CachePage(QWidget):
             "management_key": "OpenRouter Management Key",
             "display_backend": "显示后端",
             "ui_language": "界面语言",
+            "theme_mode": "主题模式",
             "single_instance_enabled": "启用单实例模式",
             "background_resident_on_close": "关闭窗口时驻留后台",
             "auto_check_updates": "启动时自动检查更新",
@@ -542,6 +576,9 @@ class CachePage(QWidget):
     def _display_config_value(self, key: str, value: object) -> str:
         if key == "ui_language" and isinstance(value, str):
             label_map = {code: label for code, label in LANGUAGE_OPTIONS}
+            return label_map.get(value, value)
+        if key == "theme_mode" and isinstance(value, str):
+            label_map = {code: _tr(label) for code, label in THEME_MODE_OPTIONS}
             return label_map.get(value, value)
         if key == "display_backend" and isinstance(value, str):
             label_map = {code: _tr(label) for code, label in DISPLAY_BACKEND_OPTIONS}

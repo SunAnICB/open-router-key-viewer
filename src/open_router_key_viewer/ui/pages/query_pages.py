@@ -81,11 +81,12 @@ class BaseQueryPage(QWidget):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll_area.enableTransparentBackground()
         outer.addWidget(self.scroll_area)
 
         content = QWidget(self.scroll_area)
         self.scroll_area.setWidget(content)
+        self.scroll_area.enableTransparentBackground()
+        content.setStyleSheet("background: transparent;")
 
         root = QVBoxLayout(content)
         root.setContentsMargins(36, 28, 36, 36)

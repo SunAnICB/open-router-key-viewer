@@ -8,6 +8,7 @@ from PySide6.QtCore import QLocale
 
 import open_router_key_viewer.i18n as i18n_module
 from open_router_key_viewer.i18n import _TRANSLATIONS, resolve_language_code
+from open_router_key_viewer.ui.runtime import resolve_theme_mode
 
 
 def _collect_translation_keys() -> set[str]:
@@ -52,3 +53,11 @@ def test_resolve_language_code_uses_system_locale(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(i18n_module.QLocale, "system", lambda: QLocale("fr_FR"))
     assert resolve_language_code(None) == "zh_CN"
+
+
+def test_resolve_theme_mode_prefers_supported_value() -> None:
+    assert resolve_theme_mode("auto") == "auto"
+    assert resolve_theme_mode("light") == "light"
+    assert resolve_theme_mode("dark") == "dark"
+    assert resolve_theme_mode("unknown") == "auto"
+    assert resolve_theme_mode(None) == "auto"

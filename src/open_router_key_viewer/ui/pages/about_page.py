@@ -58,11 +58,12 @@ class AboutPage(QWidget):
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.enableTransparentBackground()
         outer.addWidget(scroll_area)
 
         content = QWidget(scroll_area)
         scroll_area.setWidget(content)
+        scroll_area.enableTransparentBackground()
+        content.setStyleSheet("background: transparent;")
 
         root = QVBoxLayout(content)
         root.setContentsMargins(36, 28, 36, 36)

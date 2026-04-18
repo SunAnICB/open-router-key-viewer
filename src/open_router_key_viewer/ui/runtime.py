@@ -7,7 +7,7 @@ from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import QApplication, QWidget
 
 with redirect_stdout(io.StringIO()):
-    from qfluentwidgets import InfoBar, InfoBarPosition
+    from qfluentwidgets import InfoBar, InfoBarPosition, Theme, setTheme
 
 from open_router_key_viewer.i18n import DictTranslator, tr
 from open_router_key_viewer.services.openrouter import OpenRouterAPIError, OpenRouterClient
@@ -32,6 +32,11 @@ DISPLAY_BACKEND_OPTIONS: list[tuple[str, str]] = [
     ("wayland", "Wayland"),
     ("x11", "X11"),
 ]
+THEME_MODE_OPTIONS: list[tuple[str, str]] = [
+    ("auto", "跟随系统"),
+    ("light", "浅色"),
+    ("dark", "深色"),
+]
 
 
 def format_currency_value(value: object) -> str:
@@ -48,6 +53,22 @@ def install_language(app: QApplication, language_code: str) -> None:
     new_translator = DictTranslator(language_code)
     app.installTranslator(new_translator)
     app._dict_translator = new_translator  # type: ignore[attr-defined]
+
+
+def resolve_theme_mode(config_value: object) -> str:
+    if isinstance(config_value, str) and config_value in {code for code, _ in THEME_MODE_OPTIONS}:
+        return config_value
+    return "auto"
+
+
+def apply_theme_mode(theme_mode: str) -> None:
+    resolved = resolve_theme_mode(theme_mode)
+    mapping = {
+        "auto": Theme.AUTO,
+        "light": Theme.LIGHT,
+        "dark": Theme.DARK,
+    }
+    setTheme(mapping.get(resolved, Theme.AUTO))
 
 
 def show_error_bar(parent: QWidget, title: str, message: str) -> None:
@@ -144,4 +165,3 @@ class UpdateInstallWorker(QThread):
 
     def _emit_progress(self, received: int, total: int | None) -> None:
         self.progress_changed.emit(received, total or 0)
-

@@ -25,7 +25,7 @@ from open_router_key_viewer.ui.controllers.shell_controller import WindowShellCo
 from open_router_key_viewer.ui.pages.about_page import AboutPage
 from open_router_key_viewer.ui.pages.query_pages import CreditsPage, KeyInfoPage
 from open_router_key_viewer.ui.pages.settings_page import CachePage
-from open_router_key_viewer.ui.runtime import APP_DISPLAY_NAME, install_language
+from open_router_key_viewer.ui.runtime import APP_DISPLAY_NAME, apply_theme_mode, install_language
 
 _tr = tr
 
@@ -55,6 +55,7 @@ class MainWindow(FluentWindow):
             self.config_store,
             self.refresh_cache_views,
             self.apply_language,
+            self.apply_theme_mode,
             self._show_floating_window,
             False,
             False,
@@ -92,6 +93,19 @@ class MainWindow(FluentWindow):
         InfoBar.success(
             title=_tr("已保存"),
             content=_tr("界面语言已更新"),
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=2500,
+            parent=self,
+        )
+
+    def apply_theme_mode(self, theme_mode: str) -> None:
+        apply_theme_mode(theme_mode)
+        self.retranslate_ui()
+        InfoBar.success(
+            title=_tr("已保存"),
+            content=_tr("主题模式已更新"),
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP_RIGHT,
@@ -225,6 +239,7 @@ def main() -> int:
         if not single_instance_manager.start_or_activate_existing():
             return 0
     install_language(app, resolve_language_code(payload.get("ui_language")))
+    apply_theme_mode(str(payload.get("theme_mode", "auto")))
     app.setApplicationName(APP_DISPLAY_NAME)
     app.setApplicationVersion(__version__)
     setThemeColor("#0F6CBD")

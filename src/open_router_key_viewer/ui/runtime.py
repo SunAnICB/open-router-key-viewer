@@ -94,9 +94,16 @@ def stop_thread(thread: QThread | None, timeout_ms: int = 3000) -> None:
     thread.finished.connect(thread.deleteLater)
 
 
+def disconnect_signal(signal) -> None:
+    try:
+        signal.disconnect()
+    except (RuntimeError, TypeError):
+        return
+
+
 class QueryWorker(QThread):
     succeeded = Signal(dict)
-    failed = Signal(str)
+    failed = Signal(object)
 
     def __init__(self, mode: str, secret: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -113,10 +120,18 @@ class QueryWorker(QThread):
             else:
                 raise OpenRouterAPIError(f"Unsupported query mode: {self.mode}")
         except OpenRouterAPIError as exc:
-            self.failed.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.failed.emit(
+                    {
+                        "message": str(exc),
+                        "http_meta": exc.http_meta or {},
+                        "raw_response": exc.raw_response,
+                    }
+                )
             return
 
-        self.succeeded.emit(result.to_dict())
+        if not self.isInterruptionRequested():
+            self.succeeded.emit(result.to_dict())
 
 
 class UpdateCheckWorker(QThread):
@@ -131,9 +146,11 @@ class UpdateCheckWorker(QThread):
         try:
             result = self.checker.check_latest_release()
         except UpdateCheckError as exc:
-            self.failed.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc))
             return
-        self.succeeded.emit(result)
+        if not self.isInterruptionRequested():
+            self.succeeded.emit(result)
 
 
 class UpdateInstallWorker(QThread):
@@ -161,9 +178,12 @@ class UpdateInstallWorker(QThread):
                 progress_callback=self._emit_progress,
             )
         except UpdateInstallError as exc:
-            self.failed.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc))
             return
-        self.succeeded.emit()
+        if not self.isInterruptionRequested():
+            self.succeeded.emit()
 
     def _emit_progress(self, received: int, total: int | None) -> None:
-        self.progress_changed.emit(received, total or 0)
+        if not self.isInterruptionRequested():
+            self.progress_changed.emit(received, total or 0)

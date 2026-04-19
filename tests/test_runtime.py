@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from open_router_key_viewer.ui.runtime import stop_thread
+from open_router_key_viewer.ui.runtime import disconnect_signal, stop_thread
 
 
 class _FakeSignal:
@@ -9,6 +9,9 @@ class _FakeSignal:
 
     def connect(self, callback) -> None:
         self.callbacks.append(callback)
+
+    def disconnect(self) -> None:
+        self.callbacks.clear()
 
 
 class _FakeThread:
@@ -65,3 +68,13 @@ def test_stop_thread_detaches_thread_when_wait_times_out() -> None:
     assert thread.wait_calls == [500]
     assert thread.parent_values == [None]
     assert thread.finished.callbacks == [thread.deleteLater]
+
+
+def test_disconnect_signal_clears_connected_callbacks() -> None:
+    signal = _FakeSignal()
+    signal.connect(lambda: None)
+    signal.connect(lambda: None)
+
+    disconnect_signal(signal)
+
+    assert signal.callbacks == []

@@ -19,6 +19,9 @@ class _FakeSignal:
         for callback in list(self._callbacks):
             callback(*args)
 
+    def disconnect(self) -> None:
+        self._callbacks.clear()
+
 
 class _FakeWorker:
     def __init__(self, mode: str, secret: str, parent: object) -> None:
@@ -136,3 +139,27 @@ def test_stop_delegates_to_stop_thread(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert stopped == [worker]
     assert controller._worker is None
+
+
+def test_stop_disconnects_worker_signals_before_stopping(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(query_controller_module, "QueryWorker", _FakeWorker)
+    monkeypatch.setattr(query_controller_module, "stop_thread", lambda worker: None)
+
+    controller = QueryExecutionController(
+        "key-info",
+        object(),
+        on_started=lambda: None,
+        on_succeeded=lambda payload: None,
+        on_failed=lambda message: None,
+        on_finished=lambda: None,
+    )
+
+    assert controller.run("secret") is True
+    worker = controller._worker
+    assert worker is not None
+
+    controller.stop()
+
+    assert worker.succeeded._callbacks == []
+    assert worker.failed._callbacks == []
+    assert worker.finished._callbacks == []

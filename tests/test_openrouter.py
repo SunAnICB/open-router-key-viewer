@@ -119,3 +119,23 @@ def test_get_json_raises_api_error_with_http_status(monkeypatch: pytest.MonkeyPa
         OpenRouterClient().get_credits("bad-token")
 
     assert str(exc_info.value) == "bad token (status=401)"
+    assert exc_info.value.http_meta is not None
+    assert exc_info.value.http_meta["request"]["method"] == "GET"
+    assert exc_info.value.http_meta["response"]["status_code"] == 401
+    assert exc_info.value.raw_response == {"error": {"message": "bad token"}}
+
+
+def test_get_json_raises_api_error_with_raw_request_metadata_on_network_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        openrouter_module,
+        "urlopen",
+        lambda request, timeout=0: (_ for _ in ()).throw(__import__("urllib.error").error.URLError("offline")),
+    )
+
+    with pytest.raises(OpenRouterAPIError) as exc_info:
+        OpenRouterClient().get_current_key_info("sk-test-secret")
+
+    assert "Network error: offline" == str(exc_info.value)
+    assert exc_info.value.http_meta is not None
+    assert exc_info.value.http_meta["request"]["url"].endswith("/key")
+    assert exc_info.value.raw_response == {"error": "offline"}

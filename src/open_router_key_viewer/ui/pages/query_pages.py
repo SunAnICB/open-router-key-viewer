@@ -258,14 +258,34 @@ class BaseQueryPage(QWidget):
             parent=self.window(),
         )
 
-    def _handle_failure(self, message: str) -> None:
+    def _handle_failure(self, error: object) -> None:
+        if isinstance(error, dict):
+            message = str(error.get("message") or _tr("请求失败"))
+            http_meta = error.get("http_meta")
+            raw_payload = error.get("raw_response")
+        else:
+            message = str(error)
+            http_meta = {}
+            raw_payload = {"error": message}
         self._update_time_label()
         self.status_badge.set_status("error", _tr("查询失败"))
         self._summary_payload = {}
-        self._http_meta = {}
-        self._raw_payload = {"error": message}
+        self._http_meta = http_meta if isinstance(http_meta, dict) else {}
+        self._raw_payload = raw_payload if raw_payload is not None else {"error": message}
         self._render_summary_placeholder(_tr("查询失败"))
-        self.result_output.setPlainText(json.dumps({"error": message}, ensure_ascii=False, indent=2))
+        self.result_output.setPlainText(
+            json.dumps(
+                {
+                    "request": self._http_meta.get("request", {}),
+                    "response": {
+                        **self._http_meta.get("response", {}),
+                        "body": self._raw_payload,
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         self._show_error(message)
 
     def _handle_finished(self) -> None:

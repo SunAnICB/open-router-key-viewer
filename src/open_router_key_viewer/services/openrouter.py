@@ -17,6 +17,8 @@ USER_AGENT = f"open-router-key-viewer/{__version__}"
 class OpenRouterAPIError(Exception):
     message: str
     status_code: int | None = None
+    http_meta: dict[str, Any] | None = None
+    raw_response: object | None = None
 
     def __str__(self) -> str:
         if self.status_code is None:
@@ -88,6 +90,15 @@ class OpenRouterClient:
 
     def _get_json(self, path: str, api_key: str) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
+        request_meta = {
+            "method": "GET",
+            "url": url,
+            "headers": {
+                "Authorization": _mask_secret_header(api_key),
+                "Accept": "application/json",
+                "User-Agent": USER_AGENT,
+            },
+        }
         request = Request(
             url=url,
             headers={
@@ -106,28 +117,55 @@ class OpenRouterClient:
         except HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
             message = _extract_error_message(error_body) or "OpenRouter API request failed"
-            raise OpenRouterAPIError(message=message, status_code=exc.code) from exc
+            raise OpenRouterAPIError(
+                message=message,
+                status_code=exc.code,
+                http_meta={
+                    "request": request_meta,
+                    "response": {
+                        "status_code": exc.code,
+                        "headers": dict(exc.headers.items()) if exc.headers is not None else {},
+                    },
+                },
+                raw_response=_parse_raw_response(error_body),
+            ) from exc
         except URLError as exc:
-            raise OpenRouterAPIError(message=f"Network error: {exc.reason}") from exc
+            raise OpenRouterAPIError(
+                message=f"Network error: {exc.reason}",
+                http_meta={"request": request_meta, "response": {}},
+                raw_response={"error": str(exc.reason)},
+            ) from exc
 
         try:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
-            raise OpenRouterAPIError(message="OpenRouter returned invalid JSON") from exc
-
-        if not isinstance(payload, dict):
-            raise OpenRouterAPIError(message="Unexpected response shape from OpenRouter")
-        return {
-            "http_meta": {
-                "request": {
-                    "method": "GET",
-                    "url": url,
-                    "headers": {
-                        "Authorization": _mask_secret_header(api_key),
-                        "Accept": "application/json",
-                        "User-Agent": USER_AGENT,
+            raise OpenRouterAPIError(
+                message="OpenRouter returned invalid JSON",
+                http_meta={
+                    "request": request_meta,
+                    "response": {
+                        "status_code": status_code,
+                        "headers": headers,
                     },
                 },
+                raw_response=body,
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise OpenRouterAPIError(
+                message="Unexpected response shape from OpenRouter",
+                http_meta={
+                    "request": request_meta,
+                    "response": {
+                        "status_code": status_code,
+                        "headers": headers,
+                    },
+                },
+                raw_response=payload,
+            )
+        return {
+            "http_meta": {
+                "request": request_meta,
                 "response": {
                     "status_code": status_code,
                     "headers": headers,
@@ -153,6 +191,13 @@ def _extract_error_message(raw_body: str) -> str | None:
         if isinstance(message, str) and message.strip():
             return message.strip()
     return None
+
+
+def _parse_raw_response(raw_body: str) -> object:
+    try:
+        return json.loads(raw_body)
+    except json.JSONDecodeError:
+        return raw_body
 
 
 def _to_float(value: Any) -> float | None:

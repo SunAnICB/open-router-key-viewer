@@ -16,6 +16,9 @@ class _FakeSignal:
     def connect(self, callback) -> None:
         self._callbacks.append(callback)
 
+    def disconnect(self) -> None:
+        self._callbacks.clear()
+
 
 class _FakeButton:
     def __init__(self) -> None:
@@ -256,3 +259,26 @@ def test_install_success_uses_controlled_quit_path(monkeypatch: pytest.MonkeyPat
     assert scheduled and scheduled[-1][0] == 300
     scheduled[-1][1]()
     assert host.quit_calls == 1
+
+
+def test_stop_disconnects_worker_signals_before_stopping(monkeypatch: pytest.MonkeyPatch) -> None:
+    stopped: list[object] = []
+    monkeypatch.setattr(update_controller_module, "stop_thread", lambda worker: stopped.append(worker))
+    controller, _, _ = _make_controller(monkeypatch, frozen=True)
+    controller.check_updates()
+
+    class _FakeInstallWorker:
+        def __init__(self) -> None:
+            self.progress_changed = _FakeSignal()
+            self.succeeded = _FakeSignal()
+            self.failed = _FakeSignal()
+            self.finished = _FakeSignal()
+
+    controller._install_worker = _FakeInstallWorker()
+    controller.stop()
+
+    assert stopped[0] is controller._update_worker or stopped[1] is controller._update_worker
+    assert controller._install_worker.progress_changed._callbacks == []
+    assert controller._install_worker.succeeded._callbacks == []
+    assert controller._install_worker.failed._callbacks == []
+    assert controller._install_worker.finished._callbacks == []

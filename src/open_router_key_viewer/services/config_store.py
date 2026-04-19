@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any
 
 
+class ConfigStoreError(Exception):
+    """Raised when config file operations fail."""
+
+
 class ConfigStore:
     def __init__(self) -> None:
         self.config_dir = Path.home() / ".config" / "open-router-key-viewer"
@@ -49,12 +53,18 @@ class ConfigStore:
             self.config_path.unlink()
 
     def delete_config_file(self) -> None:
-        if self.config_path.exists():
-            self.config_path.unlink()
+        try:
+            if self.config_path.exists():
+                self.config_path.unlink()
+        except OSError as exc:
+            raise ConfigStoreError(f"删除配置文件失败：{exc}") from exc
 
     def delete_config_dir(self) -> None:
-        if self.config_dir.exists():
-            shutil.rmtree(self.config_dir)
+        try:
+            if self.config_dir.exists():
+                shutil.rmtree(self.config_dir)
+        except OSError as exc:
+            raise ConfigStoreError(f"删除缓存目录失败：{exc}") from exc
 
     def inspect(self) -> dict[str, Any]:
         exists = self.config_dir.exists()
@@ -69,7 +79,6 @@ class ConfigStore:
                 }
                 if path.is_file():
                     entry["size"] = path.stat().st_size
-                    entry["content"] = path.read_text(encoding="utf-8", errors="replace")
                 files.append(entry)
 
         return {

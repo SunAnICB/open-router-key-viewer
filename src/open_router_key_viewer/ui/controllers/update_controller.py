@@ -33,6 +33,7 @@ from open_router_key_viewer.ui.runtime import (
     DISPLAY_DATETIME_FORMAT,
     UpdateCheckWorker,
     UpdateInstallWorker,
+    disconnect_signal,
     show_error_bar,
     stop_thread,
 )
@@ -179,6 +180,15 @@ class AboutUpdateController:
             self._handle_update_failure(str(exc))
 
     def stop(self) -> None:
+        if self._update_worker is not None:
+            disconnect_signal(self._update_worker.succeeded)
+            disconnect_signal(self._update_worker.failed)
+            disconnect_signal(self._update_worker.finished)
+        if self._install_worker is not None:
+            disconnect_signal(self._install_worker.progress_changed)
+            disconnect_signal(self._install_worker.succeeded)
+            disconnect_signal(self._install_worker.failed)
+            disconnect_signal(self._install_worker.finished)
         stop_thread(self._update_worker)
         stop_thread(self._install_worker)
 

@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from PySide6.QtWidgets import QWidget
 
-from open_router_key_viewer.ui.runtime import QueryWorker, stop_thread
+from open_router_key_viewer.ui.runtime import QueryWorker, disconnect_signal, stop_thread
 
 
 class QueryExecutionController:
@@ -17,7 +17,7 @@ class QueryExecutionController:
         *,
         on_started: Callable[[], None],
         on_succeeded: Callable[[dict], None],
-        on_failed: Callable[[str], None],
+        on_failed: Callable[[object], None],
         on_finished: Callable[[], None],
     ) -> None:
         self.mode = mode
@@ -44,6 +44,10 @@ class QueryExecutionController:
         return True
 
     def stop(self) -> None:
+        if self._worker is not None:
+            disconnect_signal(self._worker.succeeded)
+            disconnect_signal(self._worker.failed)
+            disconnect_signal(self._worker.finished)
         stop_thread(self._worker)
         self._worker = None
 

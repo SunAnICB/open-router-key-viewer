@@ -27,7 +27,7 @@ with redirect_stdout(io.StringIO()):
     )
 
 from open_router_key_viewer.i18n import LANGUAGE_OPTIONS, resolve_language_code, tr
-from open_router_key_viewer.services.config_store import ConfigStore
+from open_router_key_viewer.services.config_store import ConfigStore, ConfigStoreError
 from open_router_key_viewer.ui.pages.settings_widgets import (
     AutoQuerySettingRow,
     InputSettingRow,
@@ -664,7 +664,11 @@ class CachePage(QWidget):
     def _delete_config_file(self) -> None:
         if not self._confirm(_tr("删除配置文件"), _tr("确认删除 config.json 吗？")):
             return
-        self.config_store.delete_config_file()
+        try:
+            self.config_store.delete_config_file()
+        except ConfigStoreError as exc:
+            self._show_error(str(exc))
+            return
         self.on_cache_changed()
         InfoBar.success(
             title=_tr("已删除"),
@@ -679,7 +683,11 @@ class CachePage(QWidget):
     def _delete_config_dir(self) -> None:
         if not self._confirm(_tr("删除缓存目录"), _tr("确认删除整个 ~/.config/open-router-key-viewer 目录吗？")):
             return
-        self.config_store.delete_config_dir()
+        try:
+            self.config_store.delete_config_dir()
+        except ConfigStoreError as exc:
+            self._show_error(str(exc))
+            return
         self.on_cache_changed()
         InfoBar.success(
             title=_tr("已删除"),

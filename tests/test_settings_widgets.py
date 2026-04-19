@@ -31,9 +31,10 @@ def test_input_setting_row_save_trims_value(qapp) -> None:
     row = InputSettingRow("Threshold", "5.0", saved.append)
 
     row.line_edit.setText("  12.5  ")
-    row._save()
+    row.line_edit.editingFinished.emit()
 
     assert saved == ["12.5"]
+    assert not hasattr(row, "save_button")
 
 
 def test_auto_query_setting_row_sync_and_save(qapp) -> None:

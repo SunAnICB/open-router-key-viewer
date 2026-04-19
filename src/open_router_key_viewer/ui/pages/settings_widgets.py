@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 with redirect_stdout(io.StringIO()):
-    from qfluentwidgets import CaptionLabel, LineEdit, PushButton, StrongBodyLabel, SwitchButton, isDarkTheme
+    from qfluentwidgets import CaptionLabel, LineEdit, StrongBodyLabel, SwitchButton, isDarkTheme
 
 from open_router_key_viewer.i18n import tr
 
@@ -63,11 +63,8 @@ class InputSettingRow(QWidget):
 
         self.line_edit = LineEdit(self)
         self.line_edit.setPlaceholderText(placeholder)
+        self.line_edit.editingFinished.connect(self._save)
         layout.addWidget(self.line_edit, 1)
-
-        self.save_button = PushButton(_tr("保存"), self)
-        self.save_button.clicked.connect(self._save)
-        layout.addWidget(self.save_button)
 
     def _save(self) -> None:
         self._on_save(self.line_edit.text().strip())

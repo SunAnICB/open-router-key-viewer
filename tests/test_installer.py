@@ -64,3 +64,36 @@ def test_uninstall_removes_installed_files(monkeypatch: pytest.MonkeyPatch, tmp_
     assert not installer.launcher_path.exists()
     assert not installer.desktop_path.exists()
     assert not installer.icon_path.exists()
+
+
+def test_install_skips_binary_copy_when_running_installed_binary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    install_root = tmp_path / ".local" / "opt" / APP_BINARY_NAME
+    install_root.mkdir(parents=True, exist_ok=True)
+    current_binary = install_root / APP_BINARY_NAME
+    current_binary.write_bytes(b"binary")
+
+    installer = AppInstaller(current_binary, is_binary_runtime=True)
+    icon_source = tmp_path / "assets" / APP_ICON_NAME
+    icon_source.parent.mkdir(parents=True, exist_ok=True)
+    icon_source.write_text("<svg />", encoding="utf-8")
+    monkeypatch.setattr(installer, "_resolve_icon_source", lambda: icon_source)
+
+    copy_calls: list[tuple[Path, Path]] = []
+    original_copy2 = __import__("shutil").copy2
+
+    def _tracking_copy2(src: Path, dst: Path, *args, **kwargs):
+        copy_calls.append((Path(src), Path(dst)))
+        return original_copy2(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr("open_router_key_viewer.services.installer.shutil.copy2", _tracking_copy2)
+
+    info = installer.install(app_display_name="OpenRouter Key Viewer")
+
+    assert info.current_is_installed is True
+    assert (current_binary, installer.binary_path) not in copy_calls
+    assert installer.launcher_path.exists()
+    assert installer.desktop_path.exists()

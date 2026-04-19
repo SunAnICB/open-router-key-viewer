@@ -30,6 +30,13 @@ from open_router_key_viewer.ui.runtime import APP_DISPLAY_NAME, apply_theme_mode
 _tr = tr
 
 
+def _safe_interval_seconds(value: object, default: int = 300) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
 class MainWindow(FluentWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -163,12 +170,12 @@ class MainWindow(FluentWindow):
         self._apply_timer(
             self.key_timer,
             bool(payload.get("poll_key_info_enabled")) and bool(payload.get("api_key")),
-            int(payload.get("poll_key_info_interval_seconds", 300)),
+            _safe_interval_seconds(payload.get("poll_key_info_interval_seconds", 300)),
         )
         self._apply_timer(
             self.credits_timer,
             bool(payload.get("poll_credits_enabled")) and bool(payload.get("management_key")),
-            int(payload.get("poll_credits_interval_seconds", 300)),
+            _safe_interval_seconds(payload.get("poll_credits_interval_seconds", 300)),
         )
 
     def _apply_timer(self, timer: QTimer, enabled: bool, interval_seconds: int) -> None:

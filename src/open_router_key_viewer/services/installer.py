@@ -78,8 +78,11 @@ class AppInstaller:
         if self.install_root.exists() and self.install_root.is_file():
             raise AppInstallError("固定安装路径被文件占用，无法继续安装。")
 
+        current_is_target = self._is_same_path(self.current_binary, self.binary_path)
+
         self.install_root.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(self.current_binary, self.binary_path)
+        if not current_is_target:
+            shutil.copy2(self.current_binary, self.binary_path)
         os.chmod(self.binary_path, 0o755)
 
         self.launcher_path.parent.mkdir(parents=True, exist_ok=True)
@@ -115,7 +118,7 @@ class AppInstaller:
         return InstallInfo(
             is_binary_runtime=True,
             is_installed=True,
-            current_is_installed=False,
+            current_is_installed=current_is_target,
             install_root=self.install_root,
             binary_path=self.binary_path,
             launcher_path=self.launcher_path,
@@ -143,6 +146,13 @@ class AppInstaller:
             if path.exists():
                 return path
         raise AppInstallError("未找到安装所需图标资源。")
+
+    @staticmethod
+    def _is_same_path(left: Path, right: Path) -> bool:
+        try:
+            return left.resolve() == right.resolve()
+        except OSError:
+            return False
 
     @staticmethod
     def _launcher_script(binary_path: Path) -> str:

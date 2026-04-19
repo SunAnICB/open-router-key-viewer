@@ -86,10 +86,12 @@ def show_error_bar(parent: QWidget, title: str, message: str) -> None:
 def stop_thread(thread: QThread | None, timeout_ms: int = 3000) -> None:
     if thread is None or not thread.isRunning():
         return
+    thread.requestInterruption()
+    thread.quit()
     if thread.wait(timeout_ms):
         return
-    thread.terminate()
-    thread.wait(1000)
+    thread.setParent(None)
+    thread.finished.connect(thread.deleteLater)
 
 
 class QueryWorker(QThread):

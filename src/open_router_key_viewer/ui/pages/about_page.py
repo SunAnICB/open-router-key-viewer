@@ -48,7 +48,12 @@ class AboutPage(QWidget):
         ).inspect()
         self._build_ui()
         self.install_controller = AboutInstallController(self, self.install_card, self._refresh_install_info)
-        self.update_controller = AboutUpdateController(self, self.update_card)
+        parent_quit = getattr(parent, "quit_application", None)
+        self.update_controller = AboutUpdateController(
+            self,
+            self.update_card,
+            quit_application=parent_quit if callable(parent_quit) else None,
+        )
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)

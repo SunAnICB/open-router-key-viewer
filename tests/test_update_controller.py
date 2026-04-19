@@ -50,8 +50,14 @@ class _FakeUpdateCard:
 
 
 class _FakeHost:
+    def __init__(self) -> None:
+        self.quit_calls = 0
+
     def window(self):
         return self
+
+    def quit_application(self) -> None:
+        self.quit_calls += 1
 
 
 @dataclass
@@ -129,7 +135,7 @@ def _make_controller(
     monkeypatch.setattr(update_controller_module.sys, "executable", "/tmp/open-router-key-viewer", raising=False)
     host = _FakeHost()
     card = _FakeUpdateCard()
-    controller = AboutUpdateController(host, card)
+    controller = AboutUpdateController(host, card, quit_application=host.quit_application)
     return controller, card, host
 
 
@@ -237,3 +243,16 @@ def test_binary_updater_uses_launcher_when_running_installed_copy(monkeypatch: p
 
     assert isinstance(controller._binary_updater, _FakeBinaryUpdater)
     assert controller._binary_updater.kwargs["relaunch_command"] == ["/tmp/open-router-key-viewer-launcher"]
+
+
+def test_install_success_uses_controlled_quit_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    scheduled: list[tuple[int, object]] = []
+    monkeypatch.setattr(update_controller_module.QTimer, "singleShot", lambda delay, callback: scheduled.append((delay, callback)))
+    controller, card, host = _make_controller(monkeypatch, frozen=True)
+
+    controller._handle_install_success()
+
+    assert card.states[-1]["title"] == "更新已下载完成"
+    assert scheduled and scheduled[-1][0] == 300
+    scheduled[-1][1]()
+    assert host.quit_calls == 1

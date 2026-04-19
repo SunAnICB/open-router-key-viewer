@@ -44,9 +44,16 @@ _tr = tr
 class AboutUpdateController:
     """Coordinate release checks and binary self-update from the about page."""
 
-    def __init__(self, host: QWidget, update_card: UpdateCard) -> None:
+    def __init__(
+        self,
+        host: QWidget,
+        update_card: UpdateCard,
+        *,
+        quit_application: Callable[[], None] | None = None,
+    ) -> None:
         self.host = host
         self.update_card = update_card
+        self._quit_application = quit_application or self._default_quit_application
         self._release_url = APP_REPOSITORY_URL + "/releases"
         self._latest_asset: ReleaseAsset | None = None
         self._update_worker: UpdateCheckWorker | None = None
@@ -455,7 +462,7 @@ class AboutUpdateController:
 
     def _handle_install_success(self) -> None:
         self._show_downloaded_state(filename=os.path.basename(sys.executable))
-        QTimer.singleShot(300, QApplication.instance().quit)
+        QTimer.singleShot(300, self._quit_application)
 
     def _handle_install_failure(self, message: str) -> None:
         self._show_download_failed_state(message)
@@ -502,3 +509,9 @@ class AboutUpdateController:
         if len(parts) >= 2:
             return parts[0], parts[1]
         return "SunAnICB", "open-router-key-viewer"
+
+    @staticmethod
+    def _default_quit_application() -> None:
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -106,7 +107,19 @@ class ConfigStore:
 
     def _write(self, payload: dict[str, Any]) -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        with self.config_path.open("w", encoding="utf-8") as file:
-            json.dump(payload, file, ensure_ascii=False, indent=2)
-            file.write("\n")
-        os.chmod(self.config_path, 0o600)
+        fd, temp_name = tempfile.mkstemp(prefix="config-", suffix=".json.tmp", dir=self.config_dir)
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                json.dump(payload, file, ensure_ascii=False, indent=2)
+                file.write("\n")
+                file.flush()
+                os.fsync(file.fileno())
+            os.chmod(temp_path, 0o600)
+            os.replace(temp_path, self.config_path)
+        except OSError:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise

@@ -37,6 +37,7 @@ THEME_MODE_OPTIONS: list[tuple[str, str]] = [
     ("light", "浅色"),
     ("dark", "深色"),
 ]
+_DETACHED_THREADS: list[QThread] = []
 
 
 def format_currency_value(value: object) -> str:
@@ -91,7 +92,16 @@ def stop_thread(thread: QThread | None, timeout_ms: int = 3000) -> None:
     if thread.wait(timeout_ms):
         return
     thread.setParent(None)
-    thread.finished.connect(thread.deleteLater)
+    _DETACHED_THREADS.append(thread)
+
+    def _release_thread() -> None:
+        try:
+            _DETACHED_THREADS.remove(thread)
+        except ValueError:
+            pass
+        thread.deleteLater()
+
+    thread.finished.connect(_release_thread)
 
 
 def disconnect_signal(signal) -> None:

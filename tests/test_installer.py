@@ -163,3 +163,48 @@ def test_install_rolls_back_partial_artifacts_when_first_install_fails(
     assert not installer.desktop_path.exists()
     assert not installer.manifest_path.exists()
     assert installer.inspect().is_installed is False
+
+
+def test_reinstall_restores_previous_install_state_when_update_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    old_binary = tmp_path / "portable-old" / APP_BINARY_NAME
+    old_binary.parent.mkdir(parents=True, exist_ok=True)
+    old_binary.write_bytes(b"old-binary")
+    new_binary = tmp_path / "portable-new" / APP_BINARY_NAME
+    new_binary.parent.mkdir(parents=True, exist_ok=True)
+    new_binary.write_bytes(b"new-binary")
+
+    old_icon = tmp_path / "assets-old" / APP_ICON_NAME
+    old_icon.parent.mkdir(parents=True, exist_ok=True)
+    old_icon.write_text("<svg>old</svg>", encoding="utf-8")
+    new_icon = tmp_path / "assets-new" / APP_ICON_NAME
+    new_icon.parent.mkdir(parents=True, exist_ok=True)
+    new_icon.write_text("<svg>new</svg>", encoding="utf-8")
+
+    installer = AppInstaller(old_binary, is_binary_runtime=True)
+    monkeypatch.setattr(installer, "_resolve_icon_source", lambda: old_icon)
+    installer.install(app_display_name="OpenRouter Key Viewer")
+
+    old_installed_binary = installer.binary_path.read_bytes()
+    old_manifest = installer.manifest_path.read_text(encoding="utf-8")
+
+    reinstall = AppInstaller(new_binary, is_binary_runtime=True)
+    monkeypatch.setattr(reinstall, "_resolve_icon_source", lambda: new_icon)
+    original_write_text = Path.write_text
+
+    def _failing_write_text(path: Path, data: str, *args, **kwargs):
+        if path == reinstall.desktop_path:
+            raise OSError("desktop write failed")
+        return original_write_text(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", _failing_write_text)
+
+    with pytest.raises(AppInstallError, match="安装失败"):
+        reinstall.install(app_display_name="OpenRouter Key Viewer")
+
+    assert reinstall.binary_path.read_bytes() == old_installed_binary
+    assert reinstall.manifest_path.read_text(encoding="utf-8") == old_manifest
+    assert reinstall.inspect().is_installed is True

@@ -103,3 +103,22 @@ def test_delete_value_raises_wrapped_error(monkeypatch, tmp_path: Path) -> None:
 
     with pytest.raises(ConfigStoreError, match="删除配置项失败"):
         store.delete_value("api_key")
+
+
+def test_write_is_atomic_when_replace_fails(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    store = ConfigStore()
+    original = {"api_key": "sk-old"}
+    store.config_dir.mkdir(parents=True, exist_ok=True)
+    store.config_path.write_text(json.dumps(original, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "open_router_key_viewer.services.config_store.os.replace",
+        lambda src, dst: (_ for _ in ()).throw(OSError("replace failed")),
+    )
+
+    with pytest.raises(ConfigStoreError, match="保存配置失败"):
+        store.save_value("api_key", "sk-new")
+
+    assert store.load() == original
+    assert not any(path.name.endswith(".json.tmp") for path in store.config_dir.iterdir())

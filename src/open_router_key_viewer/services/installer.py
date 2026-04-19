@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -81,8 +82,14 @@ class AppInstaller:
         current_is_target = self._is_same_path(self.current_binary, self.binary_path)
         previously_installed = self.binary_path.exists() and self.manifest_path.exists()
         created_paths: list[Path] = []
+        backup_dir: Path | None = None
+        backups: dict[Path, Path] = {}
 
         try:
+            if previously_installed:
+                backup_dir = Path(tempfile.mkdtemp(prefix="install-backup-", dir=self.install_root.parent))
+                backups = self._backup_existing_install(backup_dir)
+
             self.install_root.mkdir(parents=True, exist_ok=True)
             if not current_is_target:
                 shutil.copy2(self.current_binary, self.binary_path)
@@ -123,9 +130,14 @@ class AppInstaller:
             )
             created_paths.append(self.manifest_path)
         except OSError as exc:
-            if not previously_installed:
+            if previously_installed:
+                self._restore_install_backup(backups)
+            else:
                 self._rollback_install(created_paths)
             raise AppInstallError(f"安装失败：{exc}") from exc
+        finally:
+            if backup_dir is not None:
+                shutil.rmtree(backup_dir, ignore_errors=True)
 
         return InstallInfo(
             is_binary_runtime=True,
@@ -162,6 +174,32 @@ class AppInstaller:
         self._remove_empty_parents(self.icon_path.parent)
         self._remove_empty_parents(self.install_root)
 
+    def _backup_existing_install(self, backup_dir: Path) -> dict[Path, Path]:
+        backups: dict[Path, Path] = {}
+        for index, path in enumerate(self._managed_install_paths()):
+            if not path.exists():
+                continue
+            backup_path = backup_dir / f"{index}-{path.name}"
+            shutil.copy2(path, backup_path)
+            backups[path] = backup_path
+        return backups
+
+    def _restore_install_backup(self, backups: dict[Path, Path]) -> None:
+        for path in self._managed_install_paths():
+            backup_path = backups.get(path)
+            if backup_path is None:
+                try:
+                    if path.exists():
+                        path.unlink()
+                except OSError:
+                    continue
+                continue
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(backup_path, path)
+            except OSError:
+                continue
+
     def _resolve_icon_source(self) -> Path:
         candidates = [
             self.current_binary.parent / "assets" / APP_ICON_NAME,
@@ -173,6 +211,15 @@ class AppInstaller:
             if path.exists():
                 return path
         raise AppInstallError("未找到安装所需图标资源。")
+
+    def _managed_install_paths(self) -> tuple[Path, ...]:
+        return (
+            self.binary_path,
+            self.launcher_path,
+            self.icon_path,
+            self.desktop_path,
+            self.manifest_path,
+        )
 
     @staticmethod
     def _is_same_path(left: Path, right: Path) -> bool:

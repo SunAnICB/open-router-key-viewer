@@ -79,41 +79,53 @@ class AppInstaller:
             raise AppInstallError("固定安装路径被文件占用，无法继续安装。")
 
         current_is_target = self._is_same_path(self.current_binary, self.binary_path)
+        previously_installed = self.binary_path.exists() and self.manifest_path.exists()
+        created_paths: list[Path] = []
 
-        self.install_root.mkdir(parents=True, exist_ok=True)
-        if not current_is_target:
-            shutil.copy2(self.current_binary, self.binary_path)
-        os.chmod(self.binary_path, 0o755)
+        try:
+            self.install_root.mkdir(parents=True, exist_ok=True)
+            if not current_is_target:
+                shutil.copy2(self.current_binary, self.binary_path)
+                created_paths.append(self.binary_path)
+            os.chmod(self.binary_path, 0o755)
 
-        self.launcher_path.parent.mkdir(parents=True, exist_ok=True)
-        self.launcher_path.write_text(self._launcher_script(self.binary_path), encoding="utf-8")
-        os.chmod(self.launcher_path, 0o755)
+            self.launcher_path.parent.mkdir(parents=True, exist_ok=True)
+            self.launcher_path.write_text(self._launcher_script(self.binary_path), encoding="utf-8")
+            created_paths.append(self.launcher_path)
+            os.chmod(self.launcher_path, 0o755)
 
-        icon_source = self._resolve_icon_source()
-        self.icon_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(icon_source, self.icon_path)
+            icon_source = self._resolve_icon_source()
+            self.icon_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(icon_source, self.icon_path)
+            created_paths.append(self.icon_path)
 
-        self.desktop_path.parent.mkdir(parents=True, exist_ok=True)
-        self.desktop_path.write_text(
-            self._desktop_file(app_display_name, self.launcher_path, self.icon_path),
-            encoding="utf-8",
-        )
-
-        self.manifest_path.write_text(
-            json.dumps(
-                {
-                    "install_root": str(self.install_root),
-                    "binary_path": str(self.binary_path),
-                    "launcher_path": str(self.launcher_path),
-                    "desktop_path": str(self.desktop_path),
-                    "icon_path": str(self.icon_path),
-                },
-                ensure_ascii=False,
-                indent=2,
+            self.desktop_path.parent.mkdir(parents=True, exist_ok=True)
+            self.desktop_path.write_text(
+                self._desktop_file(app_display_name, self.launcher_path, self.icon_path),
+                encoding="utf-8",
             )
-            + "\n",
-            encoding="utf-8",
-        )
+            created_paths.append(self.desktop_path)
+
+            self.manifest_path.write_text(
+                json.dumps(
+                    {
+                        "install_root": str(self.install_root),
+                        "binary_path": str(self.binary_path),
+                        "launcher_path": str(self.launcher_path),
+                        "desktop_path": str(self.desktop_path),
+                        "icon_path": str(self.icon_path),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            created_paths.append(self.manifest_path)
+        except OSError as exc:
+            if not previously_installed:
+                self._rollback_install(created_paths)
+            raise AppInstallError(f"安装失败：{exc}") from exc
 
         return InstallInfo(
             is_binary_runtime=True,
@@ -126,14 +138,29 @@ class AppInstaller:
         )
 
     def uninstall(self) -> None:
-        if self.launcher_path.exists():
-            self.launcher_path.unlink()
-        if self.desktop_path.exists():
-            self.desktop_path.unlink()
-        if self.icon_path.exists():
-            self.icon_path.unlink()
-        if self.install_root.exists():
-            shutil.rmtree(self.install_root)
+        try:
+            if self.launcher_path.exists():
+                self.launcher_path.unlink()
+            if self.desktop_path.exists():
+                self.desktop_path.unlink()
+            if self.icon_path.exists():
+                self.icon_path.unlink()
+            if self.install_root.exists():
+                shutil.rmtree(self.install_root)
+        except OSError as exc:
+            raise AppInstallError(f"移除安装失败：{exc}") from exc
+
+    def _rollback_install(self, created_paths: list[Path]) -> None:
+        for path in reversed(created_paths):
+            try:
+                if path.is_file() or path.is_symlink():
+                    path.unlink(missing_ok=True)
+            except OSError:
+                continue
+        self._remove_empty_parents(self.launcher_path.parent)
+        self._remove_empty_parents(self.desktop_path.parent)
+        self._remove_empty_parents(self.icon_path.parent)
+        self._remove_empty_parents(self.install_root)
 
     def _resolve_icon_source(self) -> Path:
         candidates = [
@@ -153,6 +180,16 @@ class AppInstaller:
             return left.resolve() == right.resolve()
         except OSError:
             return False
+
+    @staticmethod
+    def _remove_empty_parents(path: Path) -> None:
+        for candidate in (path, *path.parents):
+            if candidate == candidate.parent:
+                break
+            try:
+                candidate.rmdir()
+            except OSError:
+                break
 
     @staticmethod
     def _launcher_script(binary_path: Path) -> str:

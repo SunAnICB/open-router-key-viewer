@@ -97,3 +97,69 @@ def test_install_skips_binary_copy_when_running_installed_binary(
     assert (current_binary, installer.binary_path) not in copy_calls
     assert installer.launcher_path.exists()
     assert installer.desktop_path.exists()
+
+
+def test_install_wraps_oserror_as_app_install_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    current_binary = tmp_path / "portable" / APP_BINARY_NAME
+    current_binary.parent.mkdir(parents=True, exist_ok=True)
+    current_binary.write_bytes(b"binary")
+
+    installer = AppInstaller(current_binary, is_binary_runtime=True)
+    monkeypatch.setattr(installer, "_resolve_icon_source", lambda: tmp_path / "assets" / APP_ICON_NAME)
+    monkeypatch.setattr(
+        "open_router_key_viewer.services.installer.shutil.copy2",
+        lambda src, dst, *args, **kwargs: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    with pytest.raises(AppInstallError, match="安装失败"):
+        installer.install(app_display_name="OpenRouter Key Viewer")
+
+
+def test_uninstall_wraps_oserror_as_app_install_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    current_binary = tmp_path / "portable" / APP_BINARY_NAME
+    current_binary.parent.mkdir(parents=True, exist_ok=True)
+    current_binary.write_bytes(b"binary")
+
+    installer = AppInstaller(current_binary, is_binary_runtime=True)
+    launcher = installer.launcher_path
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    launcher.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(Path, "unlink", lambda self: (_ for _ in ()).throw(OSError("busy")))
+
+    with pytest.raises(AppInstallError, match="移除安装失败"):
+        installer.uninstall()
+
+
+def test_install_rolls_back_partial_artifacts_when_first_install_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    current_binary = tmp_path / "portable" / APP_BINARY_NAME
+    current_binary.parent.mkdir(parents=True, exist_ok=True)
+    current_binary.write_bytes(b"binary")
+
+    installer = AppInstaller(current_binary, is_binary_runtime=True)
+    icon_source = tmp_path / "assets" / APP_ICON_NAME
+    icon_source.parent.mkdir(parents=True, exist_ok=True)
+    icon_source.write_text("<svg />", encoding="utf-8")
+    monkeypatch.setattr(installer, "_resolve_icon_source", lambda: icon_source)
+    original_write_text = Path.write_text
+
+    def _failing_write_text(path: Path, data: str, *args, **kwargs):
+        if path == installer.desktop_path:
+            raise OSError("desktop write failed")
+        return original_write_text(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", _failing_write_text)
+
+    with pytest.raises(AppInstallError, match="安装失败"):
+        installer.install(app_display_name="OpenRouter Key Viewer")
+
+    assert not installer.binary_path.exists()
+    assert not installer.launcher_path.exists()
+    assert not installer.desktop_path.exists()
+    assert not installer.manifest_path.exists()
+    assert installer.inspect().is_installed is False

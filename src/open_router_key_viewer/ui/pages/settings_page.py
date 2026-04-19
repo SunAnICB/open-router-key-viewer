@@ -619,7 +619,11 @@ class CachePage(QWidget):
         )
 
     def _toggle_switch_value(self, config_key: str, checked: bool) -> None:
-        self.config_store.save_flag(config_key, checked)
+        try:
+            self.config_store.save_flag(config_key, checked)
+        except ConfigStoreError as exc:
+            self._show_error(str(exc))
+            return
         if config_key == "single_instance_enabled":
             self._sync_runtime_option_state(checked)
         self.on_cache_changed()
@@ -629,23 +633,27 @@ class CachePage(QWidget):
         self.background_resident_row.setToolTip("" if single_instance_enabled else _tr("需先启用单实例模式"))
 
     def _save_input_value(self, config_key: str, raw_value: str) -> None:
-        if not raw_value:
-            self.config_store.delete_value(config_key)
-        else:
-            value: object = raw_value
-            if config_key.endswith("_interval_seconds"):
-                try:
-                    value = max(1, int(raw_value))
-                except ValueError:
-                    self._show_error(_tr("间隔必须是整数秒"))
-                    return
-            elif config_key.endswith("_threshold"):
-                try:
-                    value = float(raw_value)
-                except ValueError:
-                    self._show_error(_tr("阈值必须是数字"))
-                    return
-            self.config_store.save_value(config_key, value)
+        try:
+            if not raw_value:
+                self.config_store.delete_value(config_key)
+            else:
+                value: object = raw_value
+                if config_key.endswith("_interval_seconds"):
+                    try:
+                        value = max(1, int(raw_value))
+                    except ValueError:
+                        self._show_error(_tr("间隔必须是整数秒"))
+                        return
+                elif config_key.endswith("_threshold"):
+                    try:
+                        value = float(raw_value)
+                    except ValueError:
+                        self._show_error(_tr("阈值必须是数字"))
+                        return
+                self.config_store.save_value(config_key, value)
+        except ConfigStoreError as exc:
+            self._show_error(str(exc))
+            return
 
         self.on_cache_changed()
         InfoBar.success(

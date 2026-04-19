@@ -80,3 +80,26 @@ def test_delete_config_dir_raises_wrapped_error(monkeypatch, tmp_path: Path) -> 
 
     with pytest.raises(ConfigStoreError, match="删除缓存目录失败"):
         store.delete_config_dir()
+
+
+def test_save_value_raises_wrapped_error(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    store = ConfigStore()
+    monkeypatch.setattr(
+        store,
+        "_write",
+        lambda payload: (_ for _ in ()).throw(OSError("readonly")),
+    )
+
+    with pytest.raises(ConfigStoreError, match="保存配置失败"):
+        store.save_value("api_key", "sk-test")
+
+
+def test_delete_value_raises_wrapped_error(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    store = ConfigStore()
+    store.save_value("api_key", "sk-test")
+    monkeypatch.setattr(Path, "unlink", lambda self: (_ for _ in ()).throw(OSError("readonly")))
+
+    with pytest.raises(ConfigStoreError, match="删除配置项失败"):
+        store.delete_value("api_key")

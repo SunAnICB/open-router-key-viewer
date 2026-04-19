@@ -33,7 +33,10 @@ class ConfigStore:
     def save_value(self, key: str, value: Any) -> dict[str, Any]:
         payload = self.load() or {}
         payload[key] = value
-        self._write(payload)
+        try:
+            self._write(payload)
+        except OSError as exc:
+            raise ConfigStoreError(f"保存配置失败：{exc}") from exc
         return payload
 
     def save_flag(self, key: str, value: bool) -> dict[str, Any]:
@@ -45,12 +48,15 @@ class ConfigStore:
             return
 
         del payload[key]
-        if payload:
-            self._write(payload)
-            return
+        try:
+            if payload:
+                self._write(payload)
+                return
 
-        if self.config_path.exists():
-            self.config_path.unlink()
+            if self.config_path.exists():
+                self.config_path.unlink()
+        except OSError as exc:
+            raise ConfigStoreError(f"删除配置项失败：{exc}") from exc
 
     def delete_config_file(self) -> None:
         try:

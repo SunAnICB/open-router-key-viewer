@@ -19,7 +19,7 @@ with redirect_stdout(io.StringIO()):
     )
 
 from open_router_key_viewer.i18n import tr
-from open_router_key_viewer.services.config_store import ConfigStore
+from open_router_key_viewer.services.config_store import ConfigStore, ConfigStoreError
 from open_router_key_viewer.ui.controllers.query_controller import QueryExecutionController
 from open_router_key_viewer.ui.pages.query_widgets import QueryResultCard, SecretInputCard
 from open_router_key_viewer.ui.runtime import (
@@ -149,7 +149,11 @@ class BaseQueryPage(QWidget):
             self._show_error(_tr(self.missing_secret_message))
             return
 
-        self.config_store.save_value(self.config_key, secret)
+        try:
+            self.config_store.save_value(self.config_key, secret)
+        except ConfigStoreError as exc:
+            self._show_error(str(exc))
+            return
         self.on_cache_changed()
         InfoBar.success(
             title=_tr("已保存"),
@@ -196,7 +200,11 @@ class BaseQueryPage(QWidget):
         )
 
     def _clear_saved_secret(self) -> None:
-        self.config_store.delete_value(self.config_key)
+        try:
+            self.config_store.delete_value(self.config_key)
+        except ConfigStoreError as exc:
+            self._show_error(str(exc))
+            return
         self.secret_input.clear()
         self.on_cache_changed()
         InfoBar.success(

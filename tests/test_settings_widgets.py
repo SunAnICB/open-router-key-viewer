@@ -8,6 +8,7 @@ from open_router_key_viewer.ui.pages.settings_widgets import (
     PropertyRowsPanel,
     SwitchSettingRow,
 )
+from open_router_key_viewer.ui.widgets import StatusBadge
 
 
 def test_switch_setting_row_sync_and_callback(qapp) -> None:
@@ -77,3 +78,17 @@ def test_property_rows_panel_replaces_existing_rows(qapp) -> None:
     updated_labels = [widget.text() for widget in panel.findChildren(QLabel) if widget.text()]
     assert "Another" in updated_labels
     assert "Entry" in updated_labels
+
+
+def test_status_badge_updates_visual_state(qapp) -> None:
+    _ = qapp
+    badge = StatusBadge()
+
+    badge.set_status("success", "查询成功")
+    assert badge.title_label.text() == "查询成功"
+    assert badge.icon_label.text() == "\u2713"
+    assert "border-radius: 13px" in badge.styleSheet()
+
+    badge.set_status("error", "查询失败")
+    assert badge.title_label.text() == "查询失败"
+    assert badge.icon_label.text() == "\u2715"

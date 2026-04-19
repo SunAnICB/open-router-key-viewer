@@ -400,42 +400,118 @@ class DetailCard(ElevatedCardWidget):
 class StatusBadge(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 6, 12, 6)
-        layout.setSpacing(0)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 6, 12, 6)
+        layout.setSpacing(8)
         self.kind = "idle"
+        self._detail = ""
 
-        self.title_label = CaptionLabel(_tr("等待查询"), self)
+        self.icon_label = BodyLabel("", self)
+        icon_font = QFont(self.icon_label.font())
+        icon_font.setPointSize(icon_font.pointSize() + 1)
+        self.icon_label.setFont(icon_font)
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_label.setFixedSize(18, 18)
+        layout.addWidget(self.icon_label)
+
+        self.title_label = BodyLabel(_tr("等待查询"), self)
         layout.addWidget(self.title_label)
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.set_status("idle", _tr("等待查询"))
 
     def set_status(self, kind: str, title: str, detail: str = "") -> None:
         self.kind = kind
+        self._detail = detail
         self.title_label.setText(title)
-
         styles = (
             {
-                "idle": ("rgba(255, 255, 255, 0.10)", "rgba(255, 255, 255, 0.18)", "#F5F7FA"),
-                "loading": ("rgba(255, 185, 0, 0.18)", "rgba(255, 185, 0, 0.30)", "#FFD98A"),
-                "success": ("rgba(15, 123, 71, 0.22)", "rgba(15, 123, 71, 0.36)", "#9DE5BC"),
-                "error": ("rgba(196, 43, 28, 0.22)", "rgba(196, 43, 28, 0.36)", "#FFB3AD"),
+                "idle": {
+                    "icon": "\u2022",
+                    "bg": "rgba(255, 255, 255, 0.10)",
+                    "border": "rgba(255, 255, 255, 0.16)",
+                    "text": "#F5F7FA",
+                    "icon_bg": "rgba(255, 255, 255, 0.14)",
+                },
+                "loading": {
+                    "icon": "\u25F4",
+                    "bg": "rgba(255, 185, 0, 0.16)",
+                    "border": "rgba(255, 185, 0, 0.32)",
+                    "text": "#FFE3A8",
+                    "icon_bg": "rgba(255, 185, 0, 0.26)",
+                },
+                "success": {
+                    "icon": "\u2713",
+                    "bg": "rgba(15, 123, 71, 0.20)",
+                    "border": "rgba(15, 123, 71, 0.34)",
+                    "text": "#AEE9C5",
+                    "icon_bg": "rgba(15, 123, 71, 0.30)",
+                },
+                "error": {
+                    "icon": "\u2715",
+                    "bg": "rgba(196, 43, 28, 0.20)",
+                    "border": "rgba(196, 43, 28, 0.34)",
+                    "text": "#FFC0BA",
+                    "icon_bg": "rgba(196, 43, 28, 0.30)",
+                },
             }
             if isDarkTheme()
             else {
-                "idle": ("#F3F7FB", "#D7E3F1", "#16324F"),
-                "loading": ("#FFF7E8", "#F3D19C", "#6B4F00"),
-                "success": ("#EAF7EF", "#A9D8B8", "#0E4F2F"),
-                "error": ("#FDEEEE", "#E7A6A6", "#7A1F1F"),
+                "idle": {
+                    "icon": "\u2022",
+                    "bg": "#EEF4FA",
+                    "border": "#D5E2F0",
+                    "text": "#23415E",
+                    "icon_bg": "#DCE8F4",
+                },
+                "loading": {
+                    "icon": "\u25F4",
+                    "bg": "#FFF5E0",
+                    "border": "#F1D39C",
+                    "text": "#6A4D00",
+                    "icon_bg": "#F8E2B9",
+                },
+                "success": {
+                    "icon": "\u2713",
+                    "bg": "#E8F6EE",
+                    "border": "#AED5BC",
+                    "text": "#115533",
+                    "icon_bg": "#CFE9DA",
+                },
+                "error": {
+                    "icon": "\u2715",
+                    "bg": "#FCECEC",
+                    "border": "#E0B1B1",
+                    "text": "#7A1F1F",
+                    "icon_bg": "#F2D3D3",
+                },
             }
         )
-        bg, border, text = styles.get(kind, styles["idle"])
+        style = styles.get(kind, styles["idle"])
+        self.icon_label.setText(style["icon"])
         self.setStyleSheet(
             "QWidget {"
-            f"background-color: {bg};"
-            f"border: 1px solid {border};"
-            "border-radius: 999px;"
+            f"background-color: {style['bg']};"
+            f"border: 1px solid {style['border']};"
+            "border-radius: 13px;"
             "}"
-            f"QLabel {{ color: {text}; background: transparent; }}"
+            f"QLabel {{ color: {style['text']}; background: transparent; }}"
+        )
+        self.icon_label.setStyleSheet(
+            "QLabel {"
+            f"background-color: {style['icon_bg']};"
+            f"color: {style['text']};"
+            "border: none;"
+            "border-radius: 9px;"
+            "font-weight: 700;"
+            "}"
+        )
+        self.title_label.setStyleSheet(
+            "QLabel {"
+            f"color: {style['text']};"
+            "font-weight: 600;"
+            "border: none;"
+            "background: transparent;"
+            "}"
         )
 
     def retranslate_ui(self) -> None:

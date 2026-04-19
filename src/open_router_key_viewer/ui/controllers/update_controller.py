@@ -19,6 +19,7 @@ with redirect_stdout(io.StringIO()):
 from open_router_key_viewer import __version__
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.build_info import get_build_info
+from open_router_key_viewer.services.installer import AppInstaller
 from open_router_key_viewer.services.update_checker import (
     BinaryUpdater,
     GitHubReleaseChecker,
@@ -51,7 +52,20 @@ class AboutUpdateController:
         self._update_worker: UpdateCheckWorker | None = None
         self._install_worker: UpdateInstallWorker | None = None
         self._binary_update_supported = bool(getattr(sys, "frozen", False))
-        self._binary_updater = BinaryUpdater(Path(sys.executable)) if self._binary_update_supported else None
+        self._install_info = AppInstaller(
+            Path(sys.executable),
+            is_binary_runtime=self._binary_update_supported,
+        ).inspect()
+        relaunch_command = (
+            [str(self._install_info.launcher_path)]
+            if self._install_info.current_is_installed
+            else None
+        )
+        self._binary_updater = (
+            BinaryUpdater(Path(sys.executable), relaunch_command=relaunch_command)
+            if self._binary_update_supported
+            else None
+        )
         self._build_info = get_build_info()
         self._startup_silent_check = False
         self._refresh_update_card_state: Callable[[], None] = lambda: None

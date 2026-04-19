@@ -66,6 +66,26 @@ class _FakeReleaseChecker:
         self.kwargs = kwargs
 
 
+@dataclass
+class _FakeInstallInfo:
+    is_binary_runtime: bool = True
+    is_installed: bool = False
+    current_is_installed: bool = False
+    install_root: str | None = None
+    binary_path: str | None = None
+    launcher_path: str = "/tmp/open-router-key-viewer-launcher"
+    desktop_path: str = "/tmp/open-router-key-viewer.desktop"
+
+
+class _FakeInstaller:
+    def __init__(self, *args, **kwargs) -> None:
+        self.args = args
+        self.kwargs = kwargs
+
+    def inspect(self) -> _FakeInstallInfo:
+        return _FakeInstallInfo()
+
+
 class _FakeUpdateWorker:
     def __init__(self, checker, parent) -> None:
         self.checker = checker
@@ -87,6 +107,8 @@ class _FakeUpdateWorker:
 class _FakeBinaryUpdater:
     def __init__(self, *args, **kwargs) -> None:
         self.cleaned = False
+        self.args = args
+        self.kwargs = kwargs
 
     def cleanup_stale_updates(self) -> None:
         self.cleaned = True
@@ -102,6 +124,7 @@ def _make_controller(
     monkeypatch.setattr(update_controller_module, "GitHubReleaseChecker", _FakeReleaseChecker)
     monkeypatch.setattr(update_controller_module, "UpdateCheckWorker", _FakeUpdateWorker)
     monkeypatch.setattr(update_controller_module, "BinaryUpdater", _FakeBinaryUpdater)
+    monkeypatch.setattr(update_controller_module, "AppInstaller", _FakeInstaller)
     monkeypatch.setattr(update_controller_module.sys, "frozen", frozen, raising=False)
     monkeypatch.setattr(update_controller_module.sys, "executable", "/tmp/open-router-key-viewer", raising=False)
     host = _FakeHost()
@@ -193,3 +216,24 @@ def test_handle_update_failure_uses_error_bar_when_not_silent(monkeypatch: pytes
 
     assert card.states[-1]["title"] == "检查更新失败"
     assert errors == [(host, "检查更新失败", "boom")]
+
+
+def test_binary_updater_uses_launcher_when_running_installed_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _InstalledFakeInstaller(_FakeInstaller):
+        def inspect(self) -> _FakeInstallInfo:
+            return _FakeInstallInfo(current_is_installed=True, is_installed=True)
+
+    monkeypatch.setattr(update_controller_module, "get_build_info", lambda: _FakeBuildInfo())
+    monkeypatch.setattr(update_controller_module, "GitHubReleaseChecker", _FakeReleaseChecker)
+    monkeypatch.setattr(update_controller_module, "UpdateCheckWorker", _FakeUpdateWorker)
+    monkeypatch.setattr(update_controller_module, "BinaryUpdater", _FakeBinaryUpdater)
+    monkeypatch.setattr(update_controller_module, "AppInstaller", _InstalledFakeInstaller)
+    monkeypatch.setattr(update_controller_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(update_controller_module.sys, "executable", "/tmp/open-router-key-viewer", raising=False)
+
+    host = _FakeHost()
+    card = _FakeUpdateCard()
+    controller = AboutUpdateController(host, card)
+
+    assert isinstance(controller._binary_updater, _FakeBinaryUpdater)
+    assert controller._binary_updater.kwargs["relaunch_command"] == ["/tmp/open-router-key-viewer-launcher"]

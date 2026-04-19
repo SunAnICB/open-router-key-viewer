@@ -44,3 +44,19 @@ def test_cleanup_stale_updates_removes_old_non_pending_dirs(tmp_path: Path) -> N
     assert not old_dir.exists()
     assert pending_dir.exists()
     assert recent_dir.exists()
+
+
+def test_replacement_script_uses_custom_relaunch_command_without_logs(tmp_path: Path) -> None:
+    current_binary = tmp_path / "app"
+    current_binary.write_text("bin", encoding="utf-8")
+    updater = BinaryUpdater(
+        current_binary,
+        cache_root=tmp_path / "updates",
+        relaunch_command=["/home/test/.local/bin/open-router-key-viewer"],
+    )
+
+    script = updater._replacement_script(tmp_path / "downloaded", current_binary)
+
+    assert "apply-update.log" not in script
+    assert "relaunch.log" not in script
+    assert "nohup '/home/test/.local/bin/open-router-key-viewer' >/dev/null 2>/dev/null </dev/null &" in script

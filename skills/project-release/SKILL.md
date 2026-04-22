@@ -1,85 +1,106 @@
 ---
 name: project-release
-description: Use this skill when working in the OpenRouter Key Viewer repository and the user wants to summarize recent changes, prepare release notes, create a git tag, publish a GitHub release, or upload the built onefile binary asset for a versioned release.
+description: Use this skill when working in the OpenRouter Key Viewer repository and the user wants to publish a release. The current project flow is GitHub Actions first: confirm version state, bump if needed, create and push the tag, then report the Actions run URL and Release URL for manual verification.
 ---
 
 # Project Release
 
-Use this skill only for the `open-router-key-viewer` repository when the task is to summarize recent changes and publish a release.
+Use this skill only for the `open-router-key-viewer` repository when the task is to publish a versioned release.
+
+## Current Release Flow
+
+This repository now uses GitHub Actions as the default release path.
+
+Canonical flow:
+
+1. Confirm repository state
+2. Confirm whether the version has already been bumped
+3. If not bumped yet, update the version first
+4. Create and push tag `vX.Y.Z`
+5. Let GitHub Actions build and publish the release
+6. Return the Actions run URL and Release URL so the user can verify the result
+
+Do not default to `gh release create` or manual asset upload unless the workflow is broken and the user explicitly wants a fallback.
 
 ## Scope
 
 This skill is specific to this project:
 
 - Python desktop app managed with `uv`
-- Single version source:
+- Version source of truth:
   - `pyproject.toml`
-- Build script:
+- Tag format:
+  - `vX.Y.Z`
+- GitHub Actions workflow:
+  - `.github/workflows/release.yml`
+- Local build script remains available only for fallback or manual verification:
   - `./scripts/release.sh`
-- Main binary output:
-  - `dist/open-router-key-viewer`
 
 ## Release Workflow
 
 1. Confirm repository state.
    - Run `git status --short`
-   - Do not release from a dirty worktree unless the user explicitly wants that
+   - Be careful with unrelated uncommitted changes
+   - If the worktree is dirty, decide whether release-related files should be committed separately, stashed, or handled another way
 
 2. Confirm target version.
-   - Check `pyproject.toml`
-   - Treat `[project].version` as the only source of truth
+   - Read `pyproject.toml`
+   - Treat `[project].version` as the source of truth for release version
 
-3. Summarize changes since the previous tag.
-   - Use `git tag --list`
-   - Use `git log --oneline <last-tag>..HEAD`
-   - Group notes into a few user-facing bullets, not a commit dump
-   - Prefer features, behavior changes, packaging changes, and documentation updates
+3. Check whether version bump is already done.
+   - If the intended release version is already present in `pyproject.toml`, do not bump again
+   - If the user wants a release but version was not bumped yet, bump the version first using the project versioning rules
+   - Prefer patch/minor/major judgment based on actual completed changes, not planned changes
 
-4. Confirm GitHub CLI availability before release operations.
-   - Run `gh auth status`
-   - Run `gh repo view SunAnICB/open-router-key-viewer`
-   - If `gh` is unavailable or auth is invalid, stop and report that clearly
+4. Create and push the release tag.
+   - Tag format must be `vX.Y.Z`
+   - Tag must match `[project].version`
+   - Typical commands:
+     - `git tag vX.Y.Z`
+     - `git push origin vX.Y.Z`
 
-5. Create and push the release tag.
-   - Tag format is `vX.Y.Z`
-   - Example:
-     - `git tag -a v0.2.0 -m "Release v0.2.0"`
-     - `git push origin v0.2.0`
+5. Check GitHub Actions status.
+   - Use `gh run list --workflow release.yml --limit 5`
+   - Identify the run triggered by the pushed tag
+   - If needed, inspect with `gh run view <run-id>`
 
-6. Create the GitHub release.
-   - Use `gh release create`
-   - Title should match the tag, for example `v0.2.0`
-   - Notes should be short and grouped under a heading such as `## Highlights`
+6. Return verification URLs.
+   - Actions run URL:
+     - `https://github.com/SunAnICB/open-router-key-viewer/actions/runs/<run-id>`
+   - Release URL:
+     - `https://github.com/SunAnICB/open-router-key-viewer/releases/tag/vX.Y.Z`
+   - Explicitly tell the user to check:
+     - workflow success
+     - release creation
+     - binary asset presence
 
-7. Upload the binary asset if requested or if the release should include a runnable build.
-   - Build with `./scripts/release.sh`
-   - This script requires ImageMagick `convert`
-   - Upload with:
-     - `gh release upload vX.Y.Z dist/open-router-key-viewer --clobber`
+## Response Expectations
 
-8. Verify the release contents.
-   - Run `gh release view vX.Y.Z --json assets,url`
-   - Confirm the asset is present when expected
+When using this skill, the CLI response should clearly state:
 
-## Notes Style
+- current version
+- whether a bump was needed
+- final tag pushed
+- Actions run URL
+- Release URL
+- whether the workflow is still running, failed, or succeeded
 
-- Keep release notes concise
-- Prefer 3 to 6 bullets
-- Focus on what changed for users:
-  - new features
-  - behavior changes
-  - platform-specific support
-  - packaging or distribution changes
+Keep it operational and short. Avoid long release notes unless the user explicitly asks for them.
 
-Avoid:
+## Fallback
 
-- raw commit lists
-- internal refactor details unless user-visible
-- speculative statements
+Only use manual release steps if GitHub Actions is unavailable or broken and the user wants a fallback.
 
-## Project-Specific Reminders
+Fallback path:
 
-- The floating window is currently intended for `X11/xcb`
-- GNOME top bar indicator support may also be release-worthy when present in the current branch
-- If a release asset is uploaded, use the output from `./scripts/release.sh` instead of inventing a custom build path
-- If the repository already has a release for the target tag, update assets with `--clobber` rather than creating duplicate filenames
+- local build with `./scripts/release.sh`
+- manual GitHub inspection or `gh release` operations
+
+This is fallback only, not the default workflow.
+
+## Guardrails
+
+- Do not create a release tag that does not match `pyproject.toml`
+- Do not silently skip version confirmation
+- Do not assume local build output is the canonical release asset when Actions is available
+- Do not overwrite tags or release history unless the user explicitly asks for rewrite / force-push behavior

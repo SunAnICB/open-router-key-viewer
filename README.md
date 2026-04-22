@@ -140,6 +140,11 @@ QT_QPA_PLATFORM=xcb ./scripts/run.sh
 
 项目目前保留 PyInstaller `onefile` 打包方式。
 
+GitHub Release 现已支持通过 GitHub Actions 自动构建：
+
+- 推送形如 `vX.Y.Z` 的 tag 后，会自动在 GitHub Actions 中跑测试、构建二进制并上传到对应 Release
+- 本地 `./scripts/release.sh` 仍可继续用于手工构建验证
+
 如果使用发布脚本，还需要系统里有 ImageMagick 的 `convert`，用于从 SVG 生成图标。
 
 直接打包：

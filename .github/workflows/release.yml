@@ -14,17 +14,17 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v8.1.0
 
       - name: Compute uv cache key
         id: uv-cache-key
@@ -39,7 +39,7 @@ jobs:
           echo "hash=$(sha256sum uv.lock.cachekey | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Cache uv downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/uv
           key: ${{ runner.os }}-python-3.13-uv-${{ steps.uv-cache-key.outputs.hash }}
@@ -74,7 +74,7 @@ jobs:
         run: ./scripts/release.sh
 
       - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/open-router-key-viewer
           generate_release_notes: true

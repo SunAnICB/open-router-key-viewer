@@ -26,11 +26,23 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v4
 
+      - name: Compute uv cache key
+        id: uv-cache-key
+        shell: bash
+        run: |
+          awk '
+            /^\[\[package\]\]$/ { in_root = 0; print; next }
+            $0 == "name = \"open-router-key-viewer\"" { in_root = 1; print; next }
+            in_root && /^version = / { next }
+            { print }
+          ' uv.lock > uv.lock.cachekey
+          echo "hash=$(sha256sum uv.lock.cachekey | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
       - name: Cache uv downloads
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: ${{ runner.os }}-python-3.13-uv-${{ hashFiles('uv.lock') }}
+          key: ${{ runner.os }}-python-3.13-uv-${{ steps.uv-cache-key.outputs.hash }}
           restore-keys: |
             ${{ runner.os }}-python-3.13-uv-
 

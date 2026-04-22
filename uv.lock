@@ -52,7 +52,7 @@ wheels = [
 
 [[package]]
 name = "open-router-key-viewer"
-version = "0.7.2"
+version = "0.7.3"
 source = { editable = "." }
 dependencies = [
     { name = "pyside6-fluent-widgets" },

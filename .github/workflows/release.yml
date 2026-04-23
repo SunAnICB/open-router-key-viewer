@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       UV_CACHE_DIR: /tmp/.uv-cache
+      GITHUB_MODELS_API_URL: https://models.github.ai/inference/chat/completions
+      GITHUB_MODELS_MODEL: openai/gpt-4.1-mini
 
     steps:
       - name: Checkout repository
@@ -96,7 +98,7 @@ jobs:
             diffstat="$(git show --stat --format=fuller HEAD)"
           fi
 
-          commits="$(git log --format='- %s' "$range")"
+          commits="$(git log --format='- %s' "$range" | grep -Ev '^- (Bump version to|fixup!|squash!)' || true)"
           if [[ -z "$commits" ]]; then
             commits="- No user-facing commit summary available."
           fi
@@ -116,6 +118,7 @@ jobs:
           Requirements:
           - Output only markdown bullet lines beginning with '- '.
           - Focus on user-visible changes, maintenance updates, and release infrastructure changes.
+          - Ignore pure version bumps and release-only metadata changes unless they materially affect release reliability.
           - Do not mention commits, tags, diffs, compare links, or that you are an AI.
           - Do not invent functionality that is not supported by the provided data.
           - Keep each bullet to one sentence.
@@ -131,7 +134,7 @@ jobs:
           """
 
           payload = {
-              "model": "openai/gpt-4.1-mini",
+              "model": os.environ["GITHUB_MODELS_MODEL"],
               "messages": [
                   {
                       "role": "system",
@@ -146,7 +149,7 @@ jobs:
 
           ai_summary_unavailable=0
           response_file="github-models-response.json"
-          if ! curl -fsSL "https://models.github.ai/inference/chat/completions" \
+          if ! curl -fsSL "${GITHUB_MODELS_API_URL}" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -d @github-models-payload.json \
@@ -155,24 +158,50 @@ jobs:
           fi
 
           summary_file="release-summary.md"
+          usage_file="release-usage.txt"
           if [[ "$ai_summary_unavailable" -eq 0 ]]; then
-            uv run python - <<'PY' > "$summary_file" || ai_summary_unavailable=1
+            export SUMMARY_FILE="$summary_file"
+            export USAGE_FILE="$usage_file"
+            uv run python - <<'PY' || ai_summary_unavailable=1
           import json
+          import os
           from pathlib import Path
 
           data = json.loads(Path("github-models-response.json").read_text(encoding="utf-8"))
           content = data["choices"][0]["message"]["content"].strip()
           if not content:
               raise SystemExit(1)
-          print(content)
+          Path(os.environ["SUMMARY_FILE"]).write_text(f"{content}\n", encoding="utf-8")
+
+          usage = data.get("usage") or {}
+          lines: list[str] = []
+          for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+              value = usage.get(key)
+              if value is not None:
+                  lines.append(f"{key}={value}")
+          if not lines and usage:
+              for key, value in usage.items():
+                  lines.append(f"{key}={value}")
+          Path(os.environ["USAGE_FILE"]).write_text("\n".join(lines), encoding="utf-8")
           PY
+          fi
+
+          if [[ "$ai_summary_unavailable" -eq 0 ]]; then
+            if [[ -s "$usage_file" ]]; then
+              echo "GitHub Models usage (${GITHUB_MODELS_MODEL}):"
+              cat "$usage_file"
+            else
+              echo "GitHub Models usage (${GITHUB_MODELS_MODEL}): unavailable"
+            fi
           fi
 
           {
             echo "## Highlights"
             if [[ "$ai_summary_unavailable" -eq 1 ]]; then
-              echo "AI summary unavailable for this release."
+              echo "_AI-generated summary unavailable for this release._"
             else
+              echo "_AI-generated summary via GitHub Models (\`${GITHUB_MODELS_MODEL}\`)._"
+              echo
               cat "$summary_file"
             fi
             echo

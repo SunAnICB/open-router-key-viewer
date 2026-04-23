@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  models: read
 
 jobs:
   release:
@@ -73,9 +74,117 @@ jobs:
       - name: Build release binary
         run: ./scripts/release.sh
 
+      - name: Build release notes body
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          previous_tag="$(git tag --sort=-version:refname | grep -Fxv "$CURRENT_TAG" | head -n 1 || true)"
+          if [[ -n "$previous_tag" ]]; then
+            range="${previous_tag}..HEAD"
+            compare_url="https://github.com/${REPOSITORY}/compare/${previous_tag}...${CURRENT_TAG}"
+            diffstat="$(git diff --stat "$previous_tag" HEAD)"
+          else
+            range="HEAD"
+            compare_url=""
+            diffstat="$(git show --stat --format=fuller HEAD)"
+          fi
+
+          commits="$(git log --format='- %s' "$range")"
+          if [[ -z "$commits" ]]; then
+            commits="- No user-facing commit summary available."
+          fi
+
+          export PREVIOUS_TAG="$previous_tag"
+          export RELEASE_COMMITS="$commits"
+          export RELEASE_DIFFSTAT="$diffstat"
+
+          uv run python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          prompt = f"""You are writing GitHub release notes for a desktop Python application.
+
+          Summarize the release into 2 to 4 concise bullet points.
+          Requirements:
+          - Output only markdown bullet lines beginning with '- '.
+          - Focus on user-visible changes, maintenance updates, and release infrastructure changes.
+          - Do not mention commits, tags, diffs, compare links, or that you are an AI.
+          - Do not invent functionality that is not supported by the provided data.
+          - Keep each bullet to one sentence.
+
+          Current tag: {os.environ["CURRENT_TAG"]}
+          Previous tag: {os.environ.get("PREVIOUS_TAG") or "none"}
+
+          Commit subjects:
+          {os.environ["RELEASE_COMMITS"]}
+
+          Diffstat:
+          {os.environ["RELEASE_DIFFSTAT"]}
+          """
+
+          payload = {
+              "model": "openai/gpt-4.1-mini",
+              "messages": [
+                  {
+                      "role": "system",
+                      "content": "You write concise, accurate GitHub release notes.",
+                  },
+                  {"role": "user", "content": prompt},
+              ],
+              "temperature": 0.2,
+          }
+          Path("github-models-payload.json").write_text(json.dumps(payload), encoding="utf-8")
+          PY
+
+          ai_summary_unavailable=0
+          response_file="github-models-response.json"
+          if ! curl -fsSL "https://models.github.ai/inference/chat/completions" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -d @github-models-payload.json \
+            -o "$response_file"; then
+            ai_summary_unavailable=1
+          fi
+
+          summary_file="release-summary.md"
+          if [[ "$ai_summary_unavailable" -eq 0 ]]; then
+            uv run python - <<'PY' > "$summary_file" || ai_summary_unavailable=1
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("github-models-response.json").read_text(encoding="utf-8"))
+          content = data["choices"][0]["message"]["content"].strip()
+          if not content:
+              raise SystemExit(1)
+          print(content)
+          PY
+          fi
+
+          {
+            echo "## Highlights"
+            if [[ "$ai_summary_unavailable" -eq 1 ]]; then
+              echo "AI summary unavailable for this release."
+            else
+              cat "$summary_file"
+            fi
+            echo
+            echo "## Full Changelog"
+            if [[ -n "$compare_url" ]]; then
+              echo "$compare_url"
+            else
+              echo "Initial release."
+            fi
+          } > release-notes.md
+
       - name: Upload release asset
         uses: softprops/action-gh-release@v3
         with:
           files: dist/open-router-key-viewer
-          generate_release_notes: true
+          body_path: release-notes.md
           fail_on_unmatched_files: true

@@ -12,6 +12,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-22.04
+    env:
+      UV_CACHE_DIR: /tmp/.uv-cache
 
     steps:
       - name: Checkout repository
@@ -42,7 +44,7 @@ jobs:
       - name: Cache uv downloads
         uses: actions/cache@v5
         with:
-          path: ~/.cache/uv
+          path: /tmp/.uv-cache
           key: ${{ runner.os }}-python-3.13-uv-${{ steps.uv-cache-key.outputs.hash }}
           restore-keys: |
             ${{ runner.os }}-python-3.13-uv-

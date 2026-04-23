@@ -29,7 +29,7 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v8.1.0
 
-      - name: Compute uv cache key
+      - name: Compute normalized uv cache key
         id: uv-cache-key
         shell: bash
         run: |
@@ -76,7 +76,7 @@ jobs:
       - name: Build release binary
         run: ./scripts/release.sh
 
-      - name: Build release notes body
+      - name: Generate release notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CURRENT_TAG: ${{ github.ref_name }}
@@ -184,7 +184,7 @@ jobs:
             fi
           } > release-notes.md
 
-      - name: Upload release asset
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v3
         with:
           files: dist/open-router-key-viewer

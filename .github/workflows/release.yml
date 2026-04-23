@@ -91,11 +91,9 @@ jobs:
           if [[ -n "$previous_tag" ]]; then
             range="${previous_tag}..HEAD"
             compare_url="https://github.com/${REPOSITORY}/compare/${previous_tag}...${CURRENT_TAG}"
-            diffstat="$(git diff --stat "$previous_tag" HEAD)"
           else
             range="HEAD"
             compare_url=""
-            diffstat="$(git show --stat --format=fuller HEAD)"
           fi
 
           commits="$(git log --format='- %s' "$range" | grep -Ev '^- (Bump version to|fixup!|squash!)' || true)"
@@ -103,9 +101,23 @@ jobs:
             commits="- No user-facing commit summary available."
           fi
 
+          changed_files="$(git diff --name-only "$range" | wc -l | tr -d ' ')"
+          full_diff="$(git diff "$range" || true)"
+          full_diff_chars="$(printf '%s' "$full_diff" | wc -c | tr -d ' ')"
+          diffstat="$(git diff --stat "$range" || true)"
+
+          if [[ "$changed_files" -le 5 && "$full_diff_chars" -le 12000 ]]; then
+            release_changes="$full_diff"
+            release_changes_kind="full diff"
+          else
+            release_changes="$diffstat"
+            release_changes_kind="diffstat"
+          fi
+
           export PREVIOUS_TAG="$previous_tag"
           export RELEASE_COMMITS="$commits"
-          export RELEASE_DIFFSTAT="$diffstat"
+          export RELEASE_CHANGES="$release_changes"
+          export RELEASE_CHANGES_KIND="$release_changes_kind"
 
           uv run python - <<'PY'
           import json
@@ -129,8 +141,10 @@ jobs:
           Commit subjects:
           {os.environ["RELEASE_COMMITS"]}
 
-          Diffstat:
-          {os.environ["RELEASE_DIFFSTAT"]}
+          Change context type: {os.environ["RELEASE_CHANGES_KIND"]}
+
+          Change context:
+          {os.environ["RELEASE_CHANGES"]}
           """
 
           payload = {

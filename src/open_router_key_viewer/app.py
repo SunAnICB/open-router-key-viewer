@@ -60,6 +60,7 @@ class MainWindow(FluentWindow):
         )
         self.cache_page = CachePage(
             self.config_store,
+            self.refresh_runtime_settings,
             self.refresh_cache_views,
             self.apply_language,
             self.apply_theme_mode,
@@ -77,8 +78,10 @@ class MainWindow(FluentWindow):
             refresh_floating_metrics=self.refresh_floating_metrics,
             quit_application=self.quit_application,
         )
-        self.cache_page.floating_window_supported = self.shell_controller.floating_window_supported
-        self.cache_page.indicator_available = self.shell_controller.indicator_available
+        self.cache_page.sync_runtime_capabilities(
+            floating_window_supported=self.shell_controller.floating_window_supported,
+            indicator_available=self.shell_controller.indicator_available,
+        )
         self.cache_page.retranslate_ui()
         self.key_nav_item = self.addSubInterface(self.key_info_page, FluentIcon.CERTIFICATE, _tr("Key 配额"))
         self.credits_nav_item = self.addSubInterface(self.credits_page, FluentIcon.PIE_SINGLE, _tr("账户余额"))
@@ -135,6 +138,9 @@ class MainWindow(FluentWindow):
         self.key_info_page.load_cached_secret()
         self.credits_page.load_cached_secret()
         self.cache_page.refresh_view()
+        self.refresh_runtime_settings()
+
+    def refresh_runtime_settings(self) -> None:
         self._apply_polling_settings()
         self.shell_controller.apply_indicator_settings()
 

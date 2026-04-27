@@ -4,7 +4,7 @@ import io
 from collections.abc import Callable
 from contextlib import redirect_stdout
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 
@@ -44,7 +44,8 @@ class CachePage(QWidget):
     def __init__(
         self,
         config_store: ConfigStore,
-        on_cache_changed: Callable[[], None],
+        on_runtime_settings_changed: Callable[[], None],
+        on_global_config_changed: Callable[[], None],
         on_language_changed: Callable[[str], None],
         on_theme_changed: Callable[[str], None],
         on_open_floating_window: Callable[[], None],
@@ -55,7 +56,8 @@ class CachePage(QWidget):
         super().__init__(parent)
         self.setObjectName("cache-page")
         self.config_store = config_store
-        self.on_cache_changed = on_cache_changed
+        self.on_runtime_settings_changed = on_runtime_settings_changed
+        self.on_global_config_changed = on_global_config_changed
         self.on_language_changed = on_language_changed
         self.on_theme_changed = on_theme_changed
         self.on_open_floating_window = on_open_floating_window
@@ -91,21 +93,25 @@ class CachePage(QWidget):
 
         header = QHBoxLayout()
         header.setSpacing(12)
-        header.addWidget(TitleLabel(_tr("配置"), self))
+        self.page_title_label = TitleLabel(_tr("配置"), self)
+        header.addWidget(self.page_title_label)
         header.addStretch(1)
-        header.addWidget(CaptionLabel(_tr("显示后端"), self))
+        self.display_backend_label = CaptionLabel(_tr("显示后端"), self)
+        header.addWidget(self.display_backend_label)
         self.display_backend_combo = ComboBox(self)
         for code, label in DISPLAY_BACKEND_OPTIONS:
             self.display_backend_combo.addItem(_tr(label), userData=code)
         self.display_backend_combo.currentIndexChanged.connect(self._handle_display_backend_changed)
         header.addWidget(self.display_backend_combo)
-        header.addWidget(CaptionLabel(_tr("界面语言"), self))
+        self.language_label = CaptionLabel(_tr("界面语言"), self)
+        header.addWidget(self.language_label)
         self.language_combo = ComboBox(self)
         for code, label in LANGUAGE_OPTIONS:
             self.language_combo.addItem(label, userData=code)
         self.language_combo.currentIndexChanged.connect(self._handle_language_changed)
         header.addWidget(self.language_combo)
-        header.addWidget(CaptionLabel(_tr("主题模式"), self))
+        self.theme_mode_label = CaptionLabel(_tr("主题模式"), self)
+        header.addWidget(self.theme_mode_label)
         self.theme_mode_combo = ComboBox(self)
         for code, label in THEME_MODE_OPTIONS:
             self.theme_mode_combo.addItem(_tr(label), userData=code)
@@ -113,15 +119,14 @@ class CachePage(QWidget):
         header.addWidget(self.theme_mode_combo)
         root.addLayout(header)
 
-        root.addWidget(
-            WarningCard(
-                _tr("敏感信息提示"),
-                _tr(
-                    "保存后的 OpenRouter API Key、OpenRouter Management Key 和 Webhook URL 会以明文写入本地 config.json。 如果设备由多人共用，请谨慎启用保存功能。"
-                ),
-                self,
-            )
+        self.warning_card = WarningCard(
+            _tr("敏感信息提示"),
+            _tr(
+                "保存后的 OpenRouter API Key、OpenRouter Management Key 和 Webhook URL 会以明文写入本地 config.json。 如果设备由多人共用，请谨慎启用保存功能。"
+            ),
+            self,
         )
+        root.addWidget(self.warning_card)
 
         summary_card = ElevatedCardWidget(self)
         summary_layout = QGridLayout(summary_card)
@@ -168,15 +173,16 @@ class CachePage(QWidget):
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(4)
-        text_layout.addWidget(StrongBodyLabel(_tr("悬浮小窗"), card))
+        self.floating_title_label = StrongBodyLabel(_tr("悬浮小窗"), card)
+        text_layout.addWidget(self.floating_title_label)
         hint_text = (
             _tr("切换到仅显示剩余配额和账户余额的顶层小窗。")
             if self.floating_window_supported
             else _tr("当前仅在 X11/xcb 启动时支持悬浮小窗。")
         )
-        hint = CaptionLabel(hint_text, card)
-        hint.setWordWrap(True)
-        text_layout.addWidget(hint)
+        self.floating_hint_label = CaptionLabel(hint_text, card)
+        self.floating_hint_label.setWordWrap(True)
+        text_layout.addWidget(self.floating_hint_label)
         layout.addLayout(text_layout, 1)
 
         self.open_floating_button = PrimaryPushButton(_tr("打开悬浮小窗"), card)
@@ -195,15 +201,16 @@ class CachePage(QWidget):
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(4)
-        text_layout.addWidget(StrongBodyLabel(_tr("顶栏指示器"), card))
+        self.indicator_title_label = StrongBodyLabel(_tr("顶栏指示器"), card)
+        text_layout.addWidget(self.indicator_title_label)
         hint_text = (
             _tr("在 GNOME 顶栏显示滚动的配额和余额数据（Ubuntu 开箱即用，其他发行版需安装 AppIndicator 扩展）。")
             if self.indicator_available
             else _tr("当前环境不支持顶栏指示器（需要 D-Bus StatusNotifierWatcher 服务）。")
         )
-        hint = CaptionLabel(hint_text, card)
-        hint.setWordWrap(True)
-        text_layout.addWidget(hint)
+        self.indicator_hint_label = CaptionLabel(hint_text, card)
+        self.indicator_hint_label.setWordWrap(True)
+        text_layout.addWidget(self.indicator_hint_label)
         layout.addLayout(text_layout, 1)
 
         self.indicator_switch_row = self._create_switch_row(_tr("启用顶栏指示器"), "panel_indicator_enabled", card)
@@ -220,13 +227,14 @@ class CachePage(QWidget):
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(4)
-        text_layout.addWidget(StrongBodyLabel(_tr("运行行为"), card))
-        hint = CaptionLabel(
+        self.runtime_title_label = StrongBodyLabel(_tr("运行行为"), card)
+        text_layout.addWidget(self.runtime_title_label)
+        self.runtime_hint_label = CaptionLabel(
             _tr("单实例用于阻止重复启动；“关闭窗口时驻留后台”仅在启用单实例模式后可用。"),
             card,
         )
-        hint.setWordWrap(True)
-        text_layout.addWidget(hint)
+        self.runtime_hint_label.setWordWrap(True)
+        text_layout.addWidget(self.runtime_hint_label)
         layout.addLayout(text_layout, 1)
 
         switches = QVBoxLayout()
@@ -244,8 +252,10 @@ class CachePage(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(12)
-        layout.addWidget(StrongBodyLabel(_tr("自动查询"), card))
-        layout.addWidget(CaptionLabel(_tr("每个对象在同一行设置启动时查询、定时查询和查询间隔。"), card))
+        self.auto_query_title_label = StrongBodyLabel(_tr("自动查询"), card)
+        layout.addWidget(self.auto_query_title_label)
+        self.auto_query_hint_label = CaptionLabel(_tr("每个对象在同一行设置启动时查询、定时查询和查询间隔。"), card)
+        layout.addWidget(self.auto_query_hint_label)
 
         self.auto_key_row = self._create_auto_query_row(
             _tr("Key 配额"),
@@ -272,7 +282,8 @@ class CachePage(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(12)
-        layout.addWidget(StrongBodyLabel(_tr("告警与通知"), card))
+        self.alerts_title_label = StrongBodyLabel(_tr("告警与通知"), card)
+        layout.addWidget(self.alerts_title_label)
 
         self.notify_in_app_row = self._create_switch_row(_tr("启用应用内通知"), "notify_in_app", card)
         self.notify_system_row = self._create_switch_row(_tr("启用系统通知"), "notify_system", card)
@@ -309,10 +320,11 @@ class CachePage(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(24, 22, 24, 22)
         layout.setSpacing(12)
-        layout.addWidget(StrongBodyLabel(_tr("软件更新"), card))
-        hint = CaptionLabel(_tr("控制软件启动时是否自动检查 GitHub Release 更新。"), card)
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
+        self.update_title_label = StrongBodyLabel(_tr("软件更新"), card)
+        layout.addWidget(self.update_title_label)
+        self.update_hint_label = CaptionLabel(_tr("控制软件启动时是否自动检查 GitHub Release 更新。"), card)
+        self.update_hint_label.setWordWrap(True)
+        layout.addWidget(self.update_hint_label)
         self.auto_update_row = self._create_switch_row(_tr("启动时自动检查更新"), "auto_check_updates", card)
         layout.addWidget(self.auto_update_row)
         return card
@@ -360,22 +372,80 @@ class CachePage(QWidget):
         return card
 
     def retranslate_ui(self) -> None:
-        scroll_value = self.scroll_area.verticalScrollBar().value()
-        while self.layout().count():
-            item = self.layout().takeAt(0)
-            widget = item.widget()
-            child_layout = item.layout()
-            if widget is not None:
-                widget.deleteLater()
-            elif child_layout is not None:
-                while child_layout.count():
-                    child_item = child_layout.takeAt(0)
-                    child_widget = child_item.widget()
-                    if child_widget is not None:
-                        child_widget.deleteLater()
-        self._build_ui()
+        self.page_title_label.setText(_tr("配置"))
+        self.display_backend_label.setText(_tr("显示后端"))
+        self.language_label.setText(_tr("界面语言"))
+        self.theme_mode_label.setText(_tr("主题模式"))
+        self.warning_card.retranslate_ui(
+            _tr("敏感信息提示"),
+            _tr(
+                "保存后的 OpenRouter API Key、OpenRouter Management Key 和 Webhook URL 会以明文写入本地 config.json。 如果设备由多人共用，请谨慎启用保存功能。"
+            ),
+        )
+        self.dir_exists_card.set_labels(_tr("缓存目录"), _tr("删除整个缓存目录"))
+        self.config_exists_card.set_labels(_tr("配置文件"), _tr("删除配置文件"))
+        self.entry_count_card.set_title(_tr("已缓存项目"))
+        self.file_count_card.set_title(_tr("目录内文件"))
+        self.floating_title_label.setText(_tr("悬浮小窗"))
+        self.floating_hint_label.setText(
+            _tr("切换到仅显示剩余配额和账户余额的顶层小窗。")
+            if self.floating_window_supported
+            else _tr("当前仅在 X11/xcb 启动时支持悬浮小窗。")
+        )
+        self.open_floating_button.setText(_tr("打开悬浮小窗"))
+        self.indicator_title_label.setText(_tr("顶栏指示器"))
+        self.indicator_hint_label.setText(
+            _tr("在 GNOME 顶栏显示滚动的配额和余额数据（Ubuntu 开箱即用，其他发行版需安装 AppIndicator 扩展）。")
+            if self.indicator_available
+            else _tr("当前环境不支持顶栏指示器（需要 D-Bus StatusNotifierWatcher 服务）。")
+        )
+        self.indicator_switch_row.retranslate_ui(_tr("启用顶栏指示器"))
+        self.runtime_title_label.setText(_tr("运行行为"))
+        self.runtime_hint_label.setText(_tr("单实例用于阻止重复启动；“关闭窗口时驻留后台”仅在启用单实例模式后可用。"))
+        self.single_instance_row.retranslate_ui(_tr("启用单实例模式"))
+        self.background_resident_row.retranslate_ui(_tr("关闭窗口时驻留后台"))
+        self.auto_query_title_label.setText(_tr("自动查询"))
+        self.auto_query_hint_label.setText(_tr("每个对象在同一行设置启动时查询、定时查询和查询间隔。"))
+        self.auto_key_row.retranslate_ui(_tr("Key 配额"), "300")
+        self.auto_credits_row.retranslate_ui(_tr("账户余额"), "300")
+        self.alerts_title_label.setText(_tr("告警与通知"))
+        self.notify_in_app_row.retranslate_ui(_tr("启用应用内通知"))
+        self.notify_system_row.retranslate_ui(_tr("启用系统通知"))
+        self.key_warning_row.retranslate_ui(_tr("Key 配额 Warning 阈值"), "5.0")
+        self.key_critical_row.retranslate_ui(_tr("Key 配额 Critical 阈值"), "1.0")
+        self.credits_warning_row.retranslate_ui(_tr("账户余额 Warning 阈值"), "10.0")
+        self.credits_critical_row.retranslate_ui(_tr("账户余额 Critical 阈值"), "2.0")
+        self.webhook_key_switch_row.retranslate_ui(_tr("启用 Key 配额 Webhook"))
+        self.webhook_key_only_critical_row.retranslate_ui(_tr("Key 配额仅 Critical Webhook"))
+        self.webhook_key_url_row.retranslate_ui(_tr("Key 配额 Webhook URL"), "https://example.com/key")
+        self.webhook_credits_switch_row.retranslate_ui(_tr("启用账户余额 Webhook"))
+        self.webhook_credits_only_critical_row.retranslate_ui(_tr("账户余额仅 Critical Webhook"))
+        self.webhook_credits_url_row.retranslate_ui(_tr("账户余额 Webhook URL"), "https://example.com/credits")
+        self.update_title_label.setText(_tr("软件更新"))
+        self.update_hint_label.setText(_tr("控制软件启动时是否自动检查 GitHub Release 更新。"))
+        self.auto_update_row.retranslate_ui(_tr("启动时自动检查更新"))
+        self.refresh_button.setText(_tr("刷新"))
+        self.parsed_title.setText(_tr("已解析的数据"))
+        self.content_mode_switch.setItemText("data", _tr("解析数据"))
+        self.content_mode_switch.setItemText("file", _tr("原始文件"))
+        self._retranslate_combo_items()
         self.refresh_view()
-        QTimer.singleShot(0, lambda: self.scroll_area.verticalScrollBar().setValue(scroll_value))
+
+    def sync_runtime_capabilities(self, *, floating_window_supported: bool, indicator_available: bool) -> None:
+        self.floating_window_supported = floating_window_supported
+        self.indicator_available = indicator_available
+        self.floating_hint_label.setText(
+            _tr("切换到仅显示剩余配额和账户余额的顶层小窗。")
+            if self.floating_window_supported
+            else _tr("当前仅在 X11/xcb 启动时支持悬浮小窗。")
+        )
+        self.open_floating_button.setEnabled(self.floating_window_supported)
+        self.indicator_hint_label.setText(
+            _tr("在 GNOME 顶栏显示滚动的配额和余额数据（Ubuntu 开箱即用，其他发行版需安装 AppIndicator 扩展）。")
+            if self.indicator_available
+            else _tr("当前环境不支持顶栏指示器（需要 D-Bus StatusNotifierWatcher 服务）。")
+        )
+        self.indicator_switch_row.setEnabled(self.indicator_available)
 
     def refresh_view(self) -> None:
         snapshot = self.config_store.inspect()
@@ -460,6 +530,14 @@ class CachePage(QWidget):
         self.display_backend_combo.setCurrentIndex(index)
         self.display_backend_combo.blockSignals(False)
 
+    def _retranslate_combo_items(self) -> None:
+        for index, (_, label) in enumerate(DISPLAY_BACKEND_OPTIONS):
+            self.display_backend_combo.setItemText(index, _tr(label))
+        for index, (_, label) in enumerate(LANGUAGE_OPTIONS):
+            self.language_combo.setItemText(index, label)
+        for index, (_, label) in enumerate(THEME_MODE_OPTIONS):
+            self.theme_mode_combo.setItemText(index, _tr(label))
+
     def _handle_display_backend_changed(self, index: int) -> None:
         _ = index
         backend = self.display_backend_combo.currentData()
@@ -468,10 +546,15 @@ class CachePage(QWidget):
         current_backend = self._resolve_display_backend((self.config_store.load() or {}).get("display_backend"))
         if backend == current_backend:
             return
-        if backend == "auto":
-            self.config_store.delete_value("display_backend")
-        else:
-            self.config_store.save_value("display_backend", backend)
+        try:
+            if backend == "auto":
+                self.config_store.delete_value("display_backend")
+            else:
+                self.config_store.save_value("display_backend", backend)
+        except ConfigStoreError as exc:
+            self._show_error(str(exc))
+            return
+        self.refresh_view()
         InfoBar.success(
             title=_tr("已保存"),
             content=_tr("显示后端已更新，重启后生效"),
@@ -481,7 +564,7 @@ class CachePage(QWidget):
             duration=3000,
             parent=self.window(),
         )
-        self.on_cache_changed()
+        self.on_runtime_settings_changed()
 
     def _sync_language_combo(self, language_code: str) -> None:
         index = self.language_combo.findData(language_code)
@@ -499,7 +582,11 @@ class CachePage(QWidget):
         current_language = resolve_language_code((self.config_store.load() or {}).get("ui_language"))
         if language_code == current_language:
             return
-        self.config_store.save_value("ui_language", language_code)
+        try:
+            self.config_store.save_value("ui_language", language_code)
+        except ConfigStoreError as exc:
+            self._show_error(str(exc))
+            return
         self.on_language_changed(language_code)
 
     def _sync_theme_mode_combo(self, theme_mode: str) -> None:
@@ -518,10 +605,14 @@ class CachePage(QWidget):
         current_theme_mode = resolve_theme_mode((self.config_store.load() or {}).get("theme_mode"))
         if theme_mode == current_theme_mode:
             return
-        if theme_mode == "auto":
-            self.config_store.delete_value("theme_mode")
-        else:
-            self.config_store.save_value("theme_mode", theme_mode)
+        try:
+            if theme_mode == "auto":
+                self.config_store.delete_value("theme_mode")
+            else:
+                self.config_store.save_value("theme_mode", theme_mode)
+        except ConfigStoreError as exc:
+            self._show_error(str(exc))
+            return
         self.on_theme_changed(theme_mode)
 
     def _show_mode(self, mode: str) -> None:
@@ -626,7 +717,8 @@ class CachePage(QWidget):
             return
         if config_key == "single_instance_enabled":
             self._sync_runtime_option_state(checked)
-        self.on_cache_changed()
+        self.refresh_view()
+        self.on_runtime_settings_changed()
 
     def _sync_runtime_option_state(self, single_instance_enabled: bool) -> None:
         self.background_resident_row.setEnabled(single_instance_enabled)
@@ -655,7 +747,8 @@ class CachePage(QWidget):
             self._show_error(str(exc))
             return
 
-        self.on_cache_changed()
+        self.refresh_view()
+        self.on_runtime_settings_changed()
         InfoBar.success(
             title=_tr("已保存"),
             content=_tr("配置已更新"),
@@ -677,7 +770,7 @@ class CachePage(QWidget):
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
-        self.on_cache_changed()
+        self.on_global_config_changed()
         InfoBar.success(
             title=_tr("已删除"),
             content=_tr("配置文件已删除"),
@@ -696,7 +789,7 @@ class CachePage(QWidget):
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
-        self.on_cache_changed()
+        self.on_global_config_changed()
         InfoBar.success(
             title=_tr("已删除"),
             content=_tr("缓存目录已删除"),

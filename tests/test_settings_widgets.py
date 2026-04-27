@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLabel
-
 from open_router_key_viewer.ui.pages.settings_widgets import (
     AutoQuerySettingRow,
     InputSettingRow,
@@ -70,15 +68,18 @@ def test_property_rows_panel_replaces_existing_rows(qapp) -> None:
     panel = PropertyRowsPanel()
 
     panel.set_rows([("Key", "Value", "Note")])
-    first_labels = [widget.text() for widget in panel.findChildren(QLabel) if widget.text()]
-    assert "Key" in first_labels
-    assert "Value" in first_labels
-    assert "Note" in first_labels
+    assert panel.model.rowCount() == 1
+    assert panel.model.item(0, 0).text() == "Key"
+    assert panel.model.item(0, 1).text() == "Value"
+    assert panel.model.item(0, 2).text() == "Note"
+    assert panel.view.isColumnHidden(2) is False
 
     panel.set_rows([("Another", "Entry", "")])
-    updated_labels = [widget.text() for widget in panel.findChildren(QLabel) if widget.text()]
-    assert "Another" in updated_labels
-    assert "Entry" in updated_labels
+    assert panel.model.rowCount() == 1
+    assert panel.model.item(0, 0).text() == "Another"
+    assert panel.model.item(0, 1).text() == "Entry"
+    assert panel.model.item(0, 2).text() == ""
+    assert panel.view.isColumnHidden(2) is True
 
 
 def test_status_badge_updates_visual_state(qapp) -> None:

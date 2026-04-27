@@ -17,6 +17,7 @@ with redirect_stdout(io.StringIO()):
         HyperlinkButton,
         isDarkTheme,
         PrimaryPushButton,
+        ProgressBar,
         PushButton,
         StrongBodyLabel,
         TitleLabel,
@@ -27,8 +28,69 @@ with redirect_stdout(io.StringIO()):
 
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.state.app_metadata import APP_DISPLAY_NAME
+from open_router_key_viewer.state.progress import ProgressState
 
 _tr = tr
+
+
+class ProgressWindow(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        if parent is None:
+            self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        else:
+            self.setWindowFlags(Qt.WindowType.Widget)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedSize(420, 172)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+
+        card = ElevatedCardWidget(self)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(12)
+
+        self.title_label = StrongBodyLabel(APP_DISPLAY_NAME, card)
+        layout.addWidget(self.title_label)
+
+        self.message_label = BodyLabel(_tr("正在初始化应用..."), card)
+        layout.addWidget(self.message_label)
+
+        self.progress_bar = ProgressBar(card)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        layout.addWidget(self.progress_bar)
+
+        self.detail_label = CaptionLabel("", card)
+        self.detail_label.setWordWrap(True)
+        layout.addWidget(self.detail_label)
+
+        root.addWidget(card)
+
+    def set_progress(self, state: ProgressState) -> None:
+        self.progress_bar.setValue(max(0, min(100, state.percent)))
+        self.message_label.setText(_tr(state.message))
+        self.detail_label.setText(_tr(state.detail))
+
+    def center_on_screen(self) -> None:
+        parent = self.parentWidget()
+        if parent is not None:
+            self.move(
+                (parent.width() - self.width()) // 2,
+                (parent.height() - self.height()) // 2,
+            )
+            self.raise_()
+            return
+
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        geometry = screen.availableGeometry()
+        self.move(
+            geometry.x() + (geometry.width() - self.width()) // 2,
+            geometry.y() + (geometry.height() - self.height()) // 2,
+        )
 
 
 class MetricCard(ElevatedCardWidget):

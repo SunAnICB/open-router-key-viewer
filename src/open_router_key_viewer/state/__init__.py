@@ -27,6 +27,15 @@ from open_router_key_viewer.state.query_view_model import (
     build_query_result_view_model,
     normalize_query_error,
 )
+from open_router_key_viewer.state.progress import (
+    LANGUAGE_SWITCH_STEPS,
+    MAIN_WINDOW_STEPS,
+    STARTUP_STEPS,
+    THEME_SWITCH_STEPS,
+    ProgressState,
+    ProgressStep,
+    step_by_id,
+)
 
 __all__ = [
     "AppConfig",
@@ -36,6 +45,12 @@ __all__ = [
     "QueryPageRenderModel",
     "QueryResultViewModel",
     "QueryState",
+    "ProgressState",
+    "ProgressStep",
+    "LANGUAGE_SWITCH_STEPS",
+    "MAIN_WINDOW_STEPS",
+    "STARTUP_STEPS",
+    "THEME_SWITCH_STEPS",
     "TextSpec",
     "UpdateCardViewModel",
     "build_asset_note",
@@ -56,4 +71,5 @@ __all__ = [
     "build_update_intro_state",
     "config_display_rows",
     "normalize_query_error",
+    "step_by_id",
 ]

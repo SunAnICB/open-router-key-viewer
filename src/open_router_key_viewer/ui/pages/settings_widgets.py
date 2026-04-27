@@ -170,6 +170,8 @@ class AutoQuerySettingRow(QWidget):
 class PropertyRowsPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._style_dark: bool | None = None
+        self._rows: tuple[tuple[str, str, str], ...] = ()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -200,11 +202,16 @@ class PropertyRowsPanel(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
 
-        self._apply_view_style()
+        self._apply_view_style(force=True)
         layout.addWidget(self.view)
 
     def set_rows(self, rows: list[tuple[str, str, str]]) -> None:
-        self._apply_view_style()
+        style_changed = self._apply_view_style()
+        next_rows = tuple(rows)
+        if next_rows == self._rows and not style_changed:
+            return
+
+        self._rows = next_rows
         self.model.removeRows(0, self.model.rowCount())
         label_color = QColor("#C7D0DC") if isDarkTheme() else QColor("#667085")
         value_color = QColor("#F5F7FA") if isDarkTheme() else QColor("#111827")
@@ -239,8 +246,12 @@ class PropertyRowsPanel(QWidget):
             row_height = 44
         self.view.setFixedHeight(row_count * row_height + 14)
 
-    def _apply_view_style(self) -> None:
-        if isDarkTheme():
+    def _apply_view_style(self, *, force: bool = False) -> bool:
+        dark = isDarkTheme()
+        if not force and dark == self._style_dark:
+            return False
+        self._style_dark = dark
+        if dark:
             border = "rgba(255, 255, 255, 0.08)"
             row_bg = "rgba(255, 255, 255, 0.03)"
             alt_bg = "rgba(255, 255, 255, 0.06)"
@@ -271,3 +282,4 @@ class PropertyRowsPanel(QWidget):
             }}
             """
         )
+        return True

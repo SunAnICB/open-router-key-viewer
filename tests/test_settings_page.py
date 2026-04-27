@@ -98,3 +98,34 @@ def test_cache_page_syncs_runtime_capabilities_after_build(qapp) -> None:
 
     assert page.open_floating_button.isEnabled() is True
     assert page.indicator_switch_row.isEnabled() is True
+
+
+def test_language_and_theme_changes_are_deferred(qapp) -> None:
+    app = qapp
+    language_changes: list[str] = []
+    theme_changes: list[str] = []
+    store = _FakeConfigStore()
+    page = CachePage(
+        SettingsCoordinator(SettingsSnapshotService(store)),
+        lambda: None,
+        lambda: None,
+        language_changes.append,
+        theme_changes.append,
+        lambda: None,
+        False,
+        False,
+    )
+
+    language_index = page.language_combo.findData("en")
+    assert language_index >= 0
+    page.language_combo.setCurrentIndex(language_index)
+    assert language_changes == []
+    app.processEvents()
+    assert language_changes == ["en"]
+
+    theme_index = page.theme_mode_combo.findData("dark")
+    assert theme_index >= 0
+    page.theme_mode_combo.setCurrentIndex(theme_index)
+    assert theme_changes == []
+    app.processEvents()
+    assert theme_changes == ["dark"]

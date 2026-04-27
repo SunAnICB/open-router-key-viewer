@@ -5,7 +5,7 @@ from collections.abc import Callable
 from contextlib import redirect_stdout
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 
@@ -645,9 +645,9 @@ class CachePage(QWidget):
         elif result.effect == "global":
             self.on_global_config_changed()
         elif result.effect == "language" and isinstance(result.value, str):
-            self.on_language_changed(result.value)
+            QTimer.singleShot(0, lambda value=result.value: self.on_language_changed(value))
         elif result.effect == "theme" and isinstance(result.value, str):
-            self.on_theme_changed(result.value)
+            QTimer.singleShot(0, lambda value=result.value: self.on_theme_changed(value))
         if show_success:
             self._show_success(result.success_title, result.success_message)
 

@@ -59,6 +59,9 @@ class BaseQueryPage(QWidget):
         self.query_state = query_state
         self.on_cache_changed = on_cache_changed
         self.on_query_success = on_query_success
+        self._result_mode = "summary"
+        self._raw_http_text = ""
+        self._rendered_raw_http_text = ""
         self.query_coordinator = QueryCoordinator(
             self.mode,
             self.query_state,
@@ -128,7 +131,8 @@ class BaseQueryPage(QWidget):
         self.detail_card = self.result_card.detail_card
         self.result_output = self.result_card.result_output
         self.query_button.clicked.connect(self._query)
-        root.addWidget(self.result_card, 1)
+        root.addWidget(self.result_card)
+        root.addStretch(1)
         self._show_result_mode("summary")
         self._render_query_state(raw_http_text=build_initial_raw_http_text(_tr("在上方输入 key 后开始查询")))
 
@@ -250,7 +254,10 @@ class BaseQueryPage(QWidget):
         show_error_bar(self.window(), _tr("请求失败"), message)
 
     def _show_result_mode(self, mode: str) -> None:
+        self._result_mode = mode
         self.result_card.show_mode(mode)
+        if mode == "raw":
+            self._sync_raw_http_text()
 
     def _render_query_state(self, raw_http_text: str | None = None) -> None:
         view_model = build_query_page_render_model(self.mode, self.query_state)
@@ -260,12 +267,20 @@ class BaseQueryPage(QWidget):
         self.status_badge.set_status(view_model.status, _tr(view_model.status_message))
         self.hero_card.set_content(_tr(view_model.hero_title), _tr(view_model.hero_value), _tr(view_model.hero_note))
         self.detail_card.set_rows([(_tr(label), _tr(value), _tr(note)) for label, value, note in view_model.rows])
-        self.result_output.setPlainText(raw_http_text or view_model.raw_http_text)
+        self._raw_http_text = raw_http_text or view_model.raw_http_text
+        if self._result_mode == "raw":
+            self._sync_raw_http_text()
         self.time_label.setText(
             _tr("最近成功: -")
             if view_model.last_success_time == "-"
             else f"{_tr('最近成功:')} {view_model.last_success_time}"
         )
+
+    def _sync_raw_http_text(self) -> None:
+        if self._rendered_raw_http_text == self._raw_http_text:
+            return
+        self.result_output.setPlainText(self._raw_http_text)
+        self._rendered_raw_http_text = self._raw_http_text
 
     def retranslate_ui(self) -> None:
         self.title_label.setText(_tr(self.page_title))

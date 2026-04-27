@@ -13,6 +13,7 @@ with redirect_stdout(io.StringIO()):
         InfoBar,
         InfoBarPosition,
         SingleDirectionScrollArea,
+        SmoothMode,
         TitleLabel,
     )
 
@@ -80,6 +81,7 @@ class BaseQueryPage(QWidget):
             outer.setContentsMargins(0, 0, 0, 0)
 
         self.scroll_area = SingleDirectionScrollArea(self, Qt.Vertical)
+        self.scroll_area.setSmoothMode(SmoothMode.NO_SMOOTH)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

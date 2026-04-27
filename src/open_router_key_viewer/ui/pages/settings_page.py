@@ -22,6 +22,7 @@ with redirect_stdout(io.StringIO()):
         PrimaryPushButton,
         SegmentedWidget,
         SingleDirectionScrollArea,
+        SmoothMode,
         StrongBodyLabel,
         TextEdit,
         TitleLabel,
@@ -140,6 +141,7 @@ class CachePage(QWidget):
             outer.setContentsMargins(0, 0, 0, 0)
 
         self.scroll_area = SingleDirectionScrollArea(self, Qt.Vertical)
+        self.scroll_area.setSmoothMode(SmoothMode.NO_SMOOTH)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

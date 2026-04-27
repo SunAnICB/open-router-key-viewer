@@ -11,6 +11,7 @@ with redirect_stdout(io.StringIO()):
         BodyLabel,
         ElevatedCardWidget,
         SingleDirectionScrollArea,
+        SmoothMode,
         StrongBodyLabel,
         TitleLabel,
     )
@@ -46,6 +47,7 @@ class AboutPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
 
         scroll_area = SingleDirectionScrollArea(self, Qt.Vertical)
+        scroll_area.setSmoothMode(SmoothMode.NO_SMOOTH)
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

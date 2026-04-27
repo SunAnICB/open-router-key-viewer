@@ -12,7 +12,6 @@ with redirect_stdout(io.StringIO()):
     from qfluentwidgets import (
         CaptionLabel,
         LineEdit,
-        SmoothScrollDelegate,
         StrongBodyLabel,
         SwitchButton,
         isDarkTheme,
@@ -182,6 +181,7 @@ class PropertyRowsPanel(QWidget):
         self.view.setUniformRowHeights(True)
         self.view.setIndentation(0)
         self.view.setFrameShape(QFrame.Shape.NoFrame)
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.view.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
@@ -193,7 +193,6 @@ class PropertyRowsPanel(QWidget):
 
         self.model = QStandardItemModel(0, 3, self)
         self.view.setModel(self.model)
-        self.scroll_delegate = SmoothScrollDelegate(self.view)
 
         header = self.view.header()
         header.setStretchLastSection(False)
@@ -228,6 +227,17 @@ class PropertyRowsPanel(QWidget):
 
         self.view.setColumnHidden(2, not has_note)
         self.view.expandAll()
+        self._fit_view_height()
+
+    def _fit_view_height(self) -> None:
+        row_count = self.model.rowCount()
+        if row_count <= 0:
+            self.view.setFixedHeight(48)
+            return
+        row_height = self.view.sizeHintForRow(0)
+        if row_height <= 0:
+            row_height = 44
+        self.view.setFixedHeight(row_count * row_height + 14)
 
     def _apply_view_style(self) -> None:
         if isDarkTheme():

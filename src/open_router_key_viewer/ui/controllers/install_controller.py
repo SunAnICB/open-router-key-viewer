@@ -15,6 +15,7 @@ with redirect_stdout(io.StringIO()):
 
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.installer import AppInstallError, AppInstaller
+from open_router_key_viewer.state import InstallCardViewModel, TextSpec, build_install_state
 from open_router_key_viewer.ui.runtime import APP_DISPLAY_NAME, show_error_bar
 from open_router_key_viewer.ui.widgets import InstallCard
 
@@ -42,39 +43,32 @@ class AboutInstallController:
         self._refresh_state()
 
     def show_state(self) -> None:
-        if not self._install_info.is_binary_runtime:
-            self.install_card.set_state(
-                _tr("当前不可安装"),
-                _tr("当前是源码运行模式。安装功能仅在打包后的二进制运行时可用。"),
-                _tr("请先运行打包后的 open-router-key-viewer 二进制。"),
-                install_enabled=False,
-            )
-            self._refresh_state = self.show_state
-            return
-
-        if self._install_info.is_installed and self._install_info.install_root is not None:
-            self.install_card.set_state(
-                _tr("已安装"),
-                (
-                    _tr("当前正在运行已安装版本。")
-                    if self._install_info.current_is_installed
-                    else _tr("检测到已安装副本，可重新安装覆盖或直接移除。")
-                ),
-                _tr("固定安装目录：{root}").format(root=str(self._install_info.install_root)),
-                can_open_directory=True,
-                can_remove=True,
-                install_button_text=_tr("重新安装到固定位置"),
-            )
-        else:
-            self.install_card.set_state(
-                _tr("未安装"),
-                _tr("可将当前二进制安装到固定用户目录，并自动创建启动入口。"),
-                _tr("固定安装目录：{root}").format(root=str(self._installer.install_root)),
-                can_open_directory=False,
-                can_remove=False,
-                install_button_text=_tr("安装到固定位置"),
-            )
+        self._apply_install_card_state(build_install_state(self._install_info, self._installer.install_root))
         self._refresh_state = self.show_state
+
+    def _apply_install_card_state(self, view_model: InstallCardViewModel) -> None:
+        self.install_card.set_state(
+            self._render_text(view_model.title),
+            self._render_text(view_model.note),
+            self._render_text(view_model.meta),
+            install_enabled=view_model.install_enabled,
+            can_open_directory=view_model.can_open_directory,
+            can_remove=view_model.can_remove,
+            install_button_text=(
+                self._render_text(view_model.install_button_text)
+                if view_model.install_button_text is not None
+                else None
+            ),
+        )
+
+    def _render_text(self, spec: TextSpec) -> str:
+        if not spec.args:
+            return _tr(spec.source)
+        rendered_args = {
+            key: self._render_text(value) if isinstance(value, TextSpec) else value
+            for key, value in spec.args.items()
+        }
+        return _tr(spec.source).format(**rendered_args)
 
     def install_or_upgrade(self) -> None:
         box = MessageBox(

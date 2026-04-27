@@ -1,14 +1,10 @@
 from __future__ import annotations
 
 import io
-import json
 import sys
-import threading
 from collections.abc import Callable
 from contextlib import redirect_stdout
-from datetime import datetime
 from pathlib import Path
-from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QGuiApplication, QIcon
@@ -18,9 +14,10 @@ with redirect_stdout(io.StringIO()):
     from qfluentwidgets import InfoBar, InfoBarPosition
 
 from open_router_key_viewer.i18n import tr
+from open_router_key_viewer.services.alert_service import AlertEvent, AlertService
 from open_router_key_viewer.services.config_store import ConfigStore
 from open_router_key_viewer.state import QueryState
-from open_router_key_viewer.ui.runtime import APP_DISPLAY_NAME, DISPLAY_DATETIME_FORMAT, format_currency_value
+from open_router_key_viewer.ui.runtime import APP_DISPLAY_NAME, format_currency_value
 from open_router_key_viewer.ui.widgets import FloatingWindow
 
 try:
@@ -52,7 +49,7 @@ class WindowShellController:
         self._quit_application_callback = quit_application
         self._floating_window_supported = self._is_x11_platform()
         self._indicator_available = self._check_indicator_available()
-        self._alert_state = {"key-info": "normal", "credits": "normal"}
+        self._alert_service = AlertService()
         self._tray_icon: QSystemTrayIcon | None = None
         self._sni_tray: SNITray | None = None  # type: ignore[assignment]
         self._panel_label_timer: QTimer | None = None
@@ -300,63 +297,24 @@ class WindowShellController:
 
     def _evaluate_thresholds(self, mode: str, summary: dict[str, object]) -> None:
         config = self.config_store.load_config()
-        if mode == "key-info":
-            value = summary.get("limit_remaining")
-            warning = config.key_info_warning_threshold
-            critical = config.key_info_critical_threshold
-            target = _tr("Key 配额")
-            label = summary.get("label")
-            subject = f"{target} · {label}" if isinstance(label, str) and label.strip() else target
-        else:
-            value = summary.get("remaining_credits")
-            warning = config.credits_warning_threshold
-            critical = config.credits_critical_threshold
-            target = _tr("账户余额")
-            subject = target
-
-        if not isinstance(value, (int, float)):
+        event = self._alert_service.evaluate(mode, summary, config)
+        if event is None:
             return
-
-        level = self._classify_level(float(value), critical, warning)
-        previous = self._alert_state.get(mode, "normal")
-        if level == "normal":
-            self._alert_state[mode] = "normal"
-            return
-        if level == previous:
-            return
-
-        self._alert_state[mode] = level
         if config.notify_in_app:
-            self._notify_in_app(level, target, subject, float(value))
+            self._notify_in_app(event)
         if config.notify_system:
-            self._notify_system(level, target, subject, float(value))
-        self._maybe_send_webhook(mode, level, float(value))
+            self._notify_system(event)
+        self._alert_service.send_webhook(event)
 
-    def _classify_level(self, value: float, critical: object, warning: object) -> str:
-        try:
-            critical_value = float(critical)
-        except (TypeError, ValueError):
-            critical_value = -1.0
-        try:
-            warning_value = float(warning)
-        except (TypeError, ValueError):
-            warning_value = -1.0
-
-        if critical_value >= 0 and value <= critical_value:
-            return "critical"
-        if warning_value >= 0 and value <= warning_value:
-            return "warning"
-        return "normal"
-
-    def _notify_in_app(self, level: str, target: str, subject: str, value: float) -> None:
+    def _notify_in_app(self, event: AlertEvent) -> None:
         title = APP_DISPLAY_NAME
         content = _tr("{target} {level} 告警\n{subject} 当前值 {value:.4f}").format(
-            target=target,
-            level="Critical" if level == "critical" else "Warning",
-            subject=subject,
-            value=value,
+            target=_tr(event.target),
+            level="Critical" if event.level == "critical" else "Warning",
+            subject=event.subject.replace(event.target, _tr(event.target), 1),
+            value=event.value,
         )
-        factory = InfoBar.error if level == "critical" else InfoBar.warning
+        factory = InfoBar.error if event.level == "critical" else InfoBar.warning
         factory(
             title=title,
             content=content,
@@ -367,23 +325,23 @@ class WindowShellController:
             parent=self.host,
         )
 
-    def _notify_system(self, level: str, target: str, subject: str, value: float) -> None:
+    def _notify_system(self, event: AlertEvent) -> None:
         title = APP_DISPLAY_NAME
         content = _tr("{target} {level} 告警\n{subject} 当前值 {value:.4f}").format(
-            target=target,
-            level="Critical" if level == "critical" else "Warning",
-            subject=subject,
-            value=value,
+            target=_tr(event.target),
+            level="Critical" if event.level == "critical" else "Warning",
+            subject=event.subject.replace(event.target, _tr(event.target), 1),
+            value=event.value,
         )
 
         if self._sni_tray is not None and self._sni_tray.is_active:
-            urgency = "critical" if level == "critical" else "normal"
+            urgency = "critical" if event.level == "critical" else "normal"
             self._sni_tray.notify(title, content, urgency)
             return
 
         if self._tray_icon is None or not self._tray_icon.isVisible():
             return
-        icon = QSystemTrayIcon.MessageIcon.Critical if level == "critical" else QSystemTrayIcon.MessageIcon.Warning
+        icon = QSystemTrayIcon.MessageIcon.Critical if event.level == "critical" else QSystemTrayIcon.MessageIcon.Warning
         self._tray_icon.showMessage(title, content, icon, 5000)
 
     def _setup_tray_icon(self) -> None:
@@ -432,39 +390,3 @@ class WindowShellController:
             if path.exists():
                 return QIcon(str(path))
         return QIcon()
-
-    def _maybe_send_webhook(self, mode: str, level: str, value: float) -> None:
-        config = self.config_store.load_config()
-        if mode == "key-info":
-            enabled = config.notify_webhook_key_info_enabled
-            url = config.notify_webhook_key_info_url
-            only_critical = config.notify_webhook_key_info_only_critical
-            target = "key_info"
-        else:
-            enabled = config.notify_webhook_credits_enabled
-            url = config.notify_webhook_credits_url
-            only_critical = config.notify_webhook_credits_only_critical
-            target = "credits"
-
-        if not enabled or not isinstance(url, str) or not url.strip():
-            return
-        if only_critical and level != "critical":
-            return
-
-        body = {
-            "event": f"{target}_threshold_triggered",
-            "level": level,
-            "target": target,
-            "current_value": value,
-            "timestamp": datetime.now().strftime(DISPLAY_DATETIME_FORMAT),
-        }
-        threading.Thread(target=self._post_webhook, args=(url, body), daemon=True).start()
-
-    def _post_webhook(self, url: str, body: dict[str, object]) -> None:
-        data = json.dumps(body).encode("utf-8")
-        request = Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-        try:
-            with urlopen(request, timeout=10):
-                pass
-        except Exception:
-            pass

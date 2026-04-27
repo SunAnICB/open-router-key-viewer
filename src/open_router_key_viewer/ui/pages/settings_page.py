@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 from collections.abc import Callable
 from contextlib import redirect_stdout
+from dataclasses import dataclass
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
@@ -41,6 +42,62 @@ from open_router_key_viewer.ui.widgets import MetricCard, PathActionCard, Warnin
 _tr = tr
 
 
+@dataclass(frozen=True, slots=True)
+class SwitchBinding:
+    label: str
+    key: ConfigKey
+
+
+@dataclass(frozen=True, slots=True)
+class InputBinding:
+    label: str
+    key: ConfigKey
+    placeholder: str
+
+
+@dataclass(frozen=True, slots=True)
+class AutoQueryBinding:
+    title: str
+    auto_key: ConfigKey
+    poll_key: ConfigKey
+    interval_key: ConfigKey
+    placeholder: str = "300"
+
+
+AUTO_QUERY_BINDINGS = (
+    AutoQueryBinding(
+        "Key 配额",
+        ConfigKey.AUTO_QUERY_KEY_INFO,
+        ConfigKey.POLL_KEY_INFO_ENABLED,
+        ConfigKey.POLL_KEY_INFO_INTERVAL_SECONDS,
+    ),
+    AutoQueryBinding(
+        "账户余额",
+        ConfigKey.AUTO_QUERY_CREDITS,
+        ConfigKey.POLL_CREDITS_ENABLED,
+        ConfigKey.POLL_CREDITS_INTERVAL_SECONDS,
+    ),
+)
+
+ALERT_SWITCH_BINDINGS = (
+    SwitchBinding("启用应用内通知", ConfigKey.NOTIFY_IN_APP),
+    SwitchBinding("启用系统通知", ConfigKey.NOTIFY_SYSTEM),
+    SwitchBinding("启用 Key 配额 Webhook", ConfigKey.NOTIFY_WEBHOOK_KEY_INFO_ENABLED),
+    SwitchBinding("Key 配额仅 Critical Webhook", ConfigKey.NOTIFY_WEBHOOK_KEY_INFO_ONLY_CRITICAL),
+    SwitchBinding("启用账户余额 Webhook", ConfigKey.NOTIFY_WEBHOOK_CREDITS_ENABLED),
+    SwitchBinding("账户余额仅 Critical Webhook", ConfigKey.NOTIFY_WEBHOOK_CREDITS_ONLY_CRITICAL),
+)
+
+ALERT_INPUT_BINDINGS = (
+    InputBinding("Key 配额 Warning 阈值", ConfigKey.KEY_INFO_WARNING_THRESHOLD, "5.0"),
+    InputBinding("Key 配额 Critical 阈值", ConfigKey.KEY_INFO_CRITICAL_THRESHOLD, "1.0"),
+    InputBinding("账户余额 Warning 阈值", ConfigKey.CREDITS_WARNING_THRESHOLD, "10.0"),
+    InputBinding("账户余额 Critical 阈值", ConfigKey.CREDITS_CRITICAL_THRESHOLD, "2.0"),
+    InputBinding("Key 配额 Webhook URL", ConfigKey.NOTIFY_WEBHOOK_KEY_INFO_URL, "https://example.com/key"),
+    InputBinding("账户余额 Webhook URL", ConfigKey.NOTIFY_WEBHOOK_CREDITS_URL, "https://example.com/credits"),
+)
+
+
 class CachePage(QWidget):
     def __init__(
         self,
@@ -66,6 +123,9 @@ class CachePage(QWidget):
         self.indicator_available = indicator_available
         self._mode = "data"
         self._file_text = ""
+        self._switch_rows: dict[ConfigKey, SwitchSettingRow] = {}
+        self._input_rows: dict[ConfigKey, InputSettingRow] = {}
+        self._auto_query_rows: list[tuple[AutoQueryBinding, AutoQuerySettingRow]] = []
         self._build_ui()
         self.refresh_view()
 
@@ -258,24 +318,10 @@ class CachePage(QWidget):
         self.auto_query_hint_label = CaptionLabel(_tr("每个对象在同一行设置启动时查询、定时查询和查询间隔。"), card)
         layout.addWidget(self.auto_query_hint_label)
 
-        self.auto_key_row = self._create_auto_query_row(
-            _tr("Key 配额"),
-            ConfigKey.AUTO_QUERY_KEY_INFO,
-            ConfigKey.POLL_KEY_INFO_ENABLED,
-            ConfigKey.POLL_KEY_INFO_INTERVAL_SECONDS,
-            "300",
-            card,
-        )
-        self.auto_credits_row = self._create_auto_query_row(
-            _tr("账户余额"),
-            ConfigKey.AUTO_QUERY_CREDITS,
-            ConfigKey.POLL_CREDITS_ENABLED,
-            ConfigKey.POLL_CREDITS_INTERVAL_SECONDS,
-            "300",
-            card,
-        )
-        layout.addWidget(self.auto_key_row)
-        layout.addWidget(self.auto_credits_row)
+        for binding in AUTO_QUERY_BINDINGS:
+            row = self._create_auto_query_row(binding, card)
+            self._auto_query_rows.append((binding, row))
+            layout.addWidget(row)
         return card
 
     def _build_alerts_card(self) -> QWidget:
@@ -286,34 +332,10 @@ class CachePage(QWidget):
         self.alerts_title_label = StrongBodyLabel(_tr("告警与通知"), card)
         layout.addWidget(self.alerts_title_label)
 
-        self.notify_in_app_row = self._create_switch_row(_tr("启用应用内通知"), ConfigKey.NOTIFY_IN_APP, card)
-        self.notify_system_row = self._create_switch_row(_tr("启用系统通知"), ConfigKey.NOTIFY_SYSTEM, card)
-        self.key_warning_row = self._create_input_row(_tr("Key 配额 Warning 阈值"), ConfigKey.KEY_INFO_WARNING_THRESHOLD, "5.0", card)
-        self.key_critical_row = self._create_input_row(_tr("Key 配额 Critical 阈值"), ConfigKey.KEY_INFO_CRITICAL_THRESHOLD, "1.0", card)
-        self.credits_warning_row = self._create_input_row(_tr("账户余额 Warning 阈值"), ConfigKey.CREDITS_WARNING_THRESHOLD, "10.0", card)
-        self.credits_critical_row = self._create_input_row(_tr("账户余额 Critical 阈值"), ConfigKey.CREDITS_CRITICAL_THRESHOLD, "2.0", card)
-        self.webhook_key_switch_row = self._create_switch_row(_tr("启用 Key 配额 Webhook"), ConfigKey.NOTIFY_WEBHOOK_KEY_INFO_ENABLED, card)
-        self.webhook_key_only_critical_row = self._create_switch_row(_tr("Key 配额仅 Critical Webhook"), ConfigKey.NOTIFY_WEBHOOK_KEY_INFO_ONLY_CRITICAL, card)
-        self.webhook_key_url_row = self._create_input_row(_tr("Key 配额 Webhook URL"), ConfigKey.NOTIFY_WEBHOOK_KEY_INFO_URL, "https://example.com/key", card)
-        self.webhook_credits_switch_row = self._create_switch_row(_tr("启用账户余额 Webhook"), ConfigKey.NOTIFY_WEBHOOK_CREDITS_ENABLED, card)
-        self.webhook_credits_only_critical_row = self._create_switch_row(_tr("账户余额仅 Critical Webhook"), ConfigKey.NOTIFY_WEBHOOK_CREDITS_ONLY_CRITICAL, card)
-        self.webhook_credits_url_row = self._create_input_row(_tr("账户余额 Webhook URL"), ConfigKey.NOTIFY_WEBHOOK_CREDITS_URL, "https://example.com/credits", card)
-
-        for widget in (
-            self.notify_in_app_row,
-            self.notify_system_row,
-            self.key_warning_row,
-            self.key_critical_row,
-            self.credits_warning_row,
-            self.credits_critical_row,
-            self.webhook_key_switch_row,
-            self.webhook_key_only_critical_row,
-            self.webhook_key_url_row,
-            self.webhook_credits_switch_row,
-            self.webhook_credits_only_critical_row,
-            self.webhook_credits_url_row,
-        ):
-            layout.addWidget(widget)
+        for binding in ALERT_SWITCH_BINDINGS:
+            layout.addWidget(self._create_switch_row(_tr(binding.label), binding.key, card))
+        for binding in ALERT_INPUT_BINDINGS:
+            layout.addWidget(self._create_input_row(_tr(binding.label), binding.key, binding.placeholder, card))
         return card
 
     def _build_update_card(self) -> QWidget:
@@ -407,21 +429,10 @@ class CachePage(QWidget):
         self.background_resident_row.retranslate_ui(_tr("关闭窗口时驻留后台"))
         self.auto_query_title_label.setText(_tr("自动查询"))
         self.auto_query_hint_label.setText(_tr("每个对象在同一行设置启动时查询、定时查询和查询间隔。"))
-        self.auto_key_row.retranslate_ui(_tr("Key 配额"), "300")
-        self.auto_credits_row.retranslate_ui(_tr("账户余额"), "300")
+        for binding, row in self._auto_query_rows:
+            row.retranslate_ui(_tr(binding.title), binding.placeholder)
         self.alerts_title_label.setText(_tr("告警与通知"))
-        self.notify_in_app_row.retranslate_ui(_tr("启用应用内通知"))
-        self.notify_system_row.retranslate_ui(_tr("启用系统通知"))
-        self.key_warning_row.retranslate_ui(_tr("Key 配额 Warning 阈值"), "5.0")
-        self.key_critical_row.retranslate_ui(_tr("Key 配额 Critical 阈值"), "1.0")
-        self.credits_warning_row.retranslate_ui(_tr("账户余额 Warning 阈值"), "10.0")
-        self.credits_critical_row.retranslate_ui(_tr("账户余额 Critical 阈值"), "2.0")
-        self.webhook_key_switch_row.retranslate_ui(_tr("启用 Key 配额 Webhook"))
-        self.webhook_key_only_critical_row.retranslate_ui(_tr("Key 配额仅 Critical Webhook"))
-        self.webhook_key_url_row.retranslate_ui(_tr("Key 配额 Webhook URL"), "https://example.com/key")
-        self.webhook_credits_switch_row.retranslate_ui(_tr("启用账户余额 Webhook"))
-        self.webhook_credits_only_critical_row.retranslate_ui(_tr("账户余额仅 Critical Webhook"))
-        self.webhook_credits_url_row.retranslate_ui(_tr("账户余额 Webhook URL"), "https://example.com/credits")
+        self._retranslate_setting_rows()
         self.update_title_label.setText(_tr("软件更新"))
         self.update_hint_label.setText(_tr("控制软件启动时是否自动检查 GitHub Release 更新。"))
         self.auto_update_row.retranslate_ui(_tr("启动时自动检查更新"))
@@ -476,40 +487,18 @@ class CachePage(QWidget):
         self._sync_display_backend_combo(config.display_backend)
         self._sync_language_combo(config.ui_language)
         self._sync_theme_mode_combo(config.theme_mode)
-        self.auto_key_row.sync_state(
-            config.auto_query_key_info,
-            config.poll_key_info_enabled,
-            config.poll_key_info_interval_seconds,
-        )
-        self.auto_credits_row.sync_state(
-            config.auto_query_credits,
-            config.poll_credits_enabled,
-            config.poll_credits_interval_seconds,
-        )
-        for row, value in (
-            (self.auto_update_row, config.auto_check_updates),
-            (self.single_instance_row, config.single_instance_enabled),
-            (self.background_resident_row, config.background_resident_on_close),
-            (self.indicator_switch_row, config.panel_indicator_enabled),
-            (self.notify_in_app_row, config.notify_in_app),
-            (self.notify_system_row, config.notify_system),
-            (self.webhook_key_switch_row, config.notify_webhook_key_info_enabled),
-            (self.webhook_key_only_critical_row, config.notify_webhook_key_info_only_critical),
-            (self.webhook_credits_switch_row, config.notify_webhook_credits_enabled),
-            (self.webhook_credits_only_critical_row, config.notify_webhook_credits_only_critical),
-        ):
-            row.sync_state(value)
+        for binding, row in self._auto_query_rows:
+            row.sync_state(
+                bool(getattr(config, binding.auto_key.value)),
+                bool(getattr(config, binding.poll_key.value)),
+                getattr(config, binding.interval_key.value),
+            )
+        for key, row in self._switch_rows.items():
+            row.sync_state(bool(getattr(config, key.value)))
         self._sync_runtime_option_state(config.single_instance_enabled)
 
-        for row, value in (
-            (self.key_warning_row, config.key_info_warning_threshold),
-            (self.key_critical_row, config.key_info_critical_threshold),
-            (self.credits_warning_row, config.credits_warning_threshold),
-            (self.credits_critical_row, config.credits_critical_threshold),
-            (self.webhook_key_url_row, config.notify_webhook_key_info_url),
-            (self.webhook_credits_url_row, config.notify_webhook_credits_url),
-        ):
-            row.sync_value(value)
+        for key, row in self._input_rows.items():
+            row.sync_value(getattr(config, key.value))
 
         self._render_parsed_data(payload)
         self._file_text = self.config_store.read_raw_config() or _tr("未找到 config.json 文件")
@@ -624,37 +613,43 @@ class CachePage(QWidget):
         self.parsed_rows.set_rows(rows)
 
     def _create_switch_row(self, text: str, config_key: ConfigKey, parent: QWidget) -> SwitchSettingRow:
-        return SwitchSettingRow(
+        row = SwitchSettingRow(
             text,
             lambda checked, key=config_key: self._toggle_switch_value(key, checked),
             parent,
         )
+        self._switch_rows[config_key] = row
+        return row
 
     def _create_auto_query_row(
         self,
-        title: str,
-        auto_query_key: ConfigKey,
-        poll_key: ConfigKey,
-        interval_key: ConfigKey,
-        placeholder: str,
+        binding: AutoQueryBinding,
         parent: QWidget,
     ) -> AutoQuerySettingRow:
         return AutoQuerySettingRow(
-            title,
-            placeholder,
-            lambda checked, key=auto_query_key: self._toggle_switch_value(key, checked),
-            lambda checked, key=poll_key: self._toggle_switch_value(key, checked),
-            lambda raw, key=interval_key: self._save_input_value(key, raw),
+            _tr(binding.title),
+            binding.placeholder,
+            lambda checked, key=binding.auto_key: self._toggle_switch_value(key, checked),
+            lambda checked, key=binding.poll_key: self._toggle_switch_value(key, checked),
+            lambda raw, key=binding.interval_key: self._save_input_value(key, raw),
             parent,
         )
 
     def _create_input_row(self, text: str, config_key: ConfigKey, placeholder: str, parent: QWidget) -> InputSettingRow:
-        return InputSettingRow(
+        row = InputSettingRow(
             text,
             placeholder,
             lambda raw, key=config_key: self._save_input_value(key, raw),
             parent,
         )
+        self._input_rows[config_key] = row
+        return row
+
+    def _retranslate_setting_rows(self) -> None:
+        for binding in ALERT_SWITCH_BINDINGS:
+            self._switch_rows[binding.key].retranslate_ui(_tr(binding.label))
+        for binding in ALERT_INPUT_BINDINGS:
+            self._input_rows[binding.key].retranslate_ui(_tr(binding.label), binding.placeholder)
 
     def _toggle_switch_value(self, config_key: ConfigKey, checked: bool) -> None:
         try:

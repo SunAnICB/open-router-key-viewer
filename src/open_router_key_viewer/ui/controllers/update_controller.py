@@ -27,6 +27,21 @@ from open_router_key_viewer.services.update_checker import (
     UpdateCheckResult,
     UpdateInstallError,
 )
+from open_router_key_viewer.state import (
+    TextSpec,
+    UpdateCardViewModel,
+    build_asset_note,
+    build_commit_note,
+    build_dev_build_state,
+    build_download_failed_state,
+    build_downloaded_state,
+    build_downloading_state,
+    build_latest_state,
+    build_update_available_state,
+    build_update_checking_state,
+    build_update_failure_state,
+    build_update_intro_state,
+)
 from open_router_key_viewer.ui.runtime import (
     APP_REPOSITORY_URL,
     BINARY_ASSET_NAME,
@@ -105,20 +120,7 @@ class AboutUpdateController:
         self._refresh_update_card_state()
 
     def show_intro_state(self) -> None:
-        if self._binary_update_supported:
-            self.update_card.set_state(
-                _tr("可检查二进制更新"),
-                _tr("当前为打包后的二进制运行。点击“检查更新”后，将对比 GitHub Release 中的最新版本。"),
-                _tr("支持打开 Release 页面，也支持下载并在应用退出后替换当前二进制文件。"),
-                can_open_release=True,
-            )
-        else:
-            self.update_card.set_state(
-                _tr("可检查更新"),
-                _tr("当前是源码运行模式。你仍然可以查看最新 Release 和版本信息。"),
-                _tr("源码运行不支持下载后直接替换当前二进制文件。"),
-                can_open_release=True,
-            )
+        self._apply_update_card_state(build_update_intro_state(self._binary_update_supported))
         self._refresh_update_card_state = self.show_intro_state
 
     def check_updates(self) -> None:
@@ -200,11 +202,7 @@ class AboutUpdateController:
         self.update_card.release_button.setEnabled(False)
         self.update_card.replace_button.setEnabled(False)
         if not self._startup_silent_check:
-            self.update_card.set_state(
-                _tr("正在检查更新"),
-                _tr("正在查询 GitHub Release 中的最新已发布版本。"),
-                _tr("仅检查正式 Release，不包含 draft 或 prerelease。"),
-            )
+            self._apply_update_card_state(build_update_checking_state())
             self._refresh_update_card_state = self._start_update_check_state
         self._update_worker = UpdateCheckWorker(self._release_checker, self.host)
         self._update_worker.succeeded.connect(self._handle_update_success)
@@ -213,11 +211,7 @@ class AboutUpdateController:
         self._update_worker.start()
 
     def _start_update_check_state(self) -> None:
-        self.update_card.set_state(
-            _tr("正在检查更新"),
-            _tr("正在查询 GitHub Release 中的最新已发布版本。"),
-            _tr("仅检查正式 Release，不包含 draft 或 prerelease。"),
-        )
+        self._apply_update_card_state(build_update_checking_state())
         self._refresh_update_card_state = self._start_update_check_state
 
     def _show_update_available_state(
@@ -225,24 +219,20 @@ class AboutUpdateController:
         *,
         current_version: str,
         release_version: str,
-        asset_note: str,
+        asset_note: TextSpec,
         published_at: str,
         replace_note: str,
         can_replace: bool,
     ) -> None:
-        self.update_card.set_state(
-            _tr("发现新版本 v{version}").format(version=release_version),
-            _tr("当前版本 v{current_version}，最新版本 v{release_version}。").format(
+        self._apply_update_card_state(
+            build_update_available_state(
                 current_version=current_version,
                 release_version=release_version,
-            ),
-            _tr("{asset_note}  发布时间：{published_at}{replace_note}").format(
                 asset_note=asset_note,
                 published_at=published_at,
                 replace_note=replace_note,
+                can_replace=can_replace,
             ),
-            can_open_release=True,
-            can_replace=can_replace,
         )
         self._refresh_update_card_state = lambda: self._show_update_available_state(
             current_version=current_version,
@@ -260,21 +250,16 @@ class AboutUpdateController:
         release_version: str,
         tag_name: str,
         published_at: str,
-        commit_note: str,
+        commit_note: TextSpec | None,
     ) -> None:
-        self.update_card.set_state(
-            _tr("当前是非 Release 的开发版本"),
-            _tr("当前构建与最新 Release 不完全一致。版本：v{current_version}，最新 Release：v{release_version}。").format(
+        self._apply_update_card_state(
+            build_dev_build_state(
                 current_version=current_version,
                 release_version=release_version,
-            ),
-            _tr("最新公开标签：{tag_name}  发布时间：{published_at}{commit_note}").format(
                 tag_name=tag_name,
                 published_at=published_at,
                 commit_note=commit_note,
             ),
-            can_open_release=True,
-            can_replace=False,
         )
         self._refresh_update_card_state = lambda: self._show_dev_build_state(
             current_version=current_version,
@@ -285,17 +270,12 @@ class AboutUpdateController:
         )
 
     def _show_latest_state(self, *, current_version: str, tag_name: str, published_at: str) -> None:
-        self.update_card.set_state(
-            _tr("当前已是最新版本"),
-            _tr("当前版本 v{current_version} 已与最新 Release 保持一致。").format(
-                current_version=current_version
-            ),
-            _tr("最新标签：{tag_name}  发布时间：{published_at}").format(
+        self._apply_update_card_state(
+            build_latest_state(
+                current_version=current_version,
                 tag_name=tag_name,
                 published_at=published_at,
             ),
-            can_open_release=True,
-            can_replace=False,
         )
         self._refresh_update_card_state = lambda: self._show_latest_state(
             current_version=current_version,
@@ -304,47 +284,34 @@ class AboutUpdateController:
         )
 
     def _show_update_failure_state(self, message: str) -> None:
-        self.update_card.set_state(
-            _tr("检查更新失败"),
-            message,
-            _tr("请稍后重试，或手动打开 GitHub Release 页面查看。"),
-            can_open_release=True,
-            can_replace=False,
-        )
+        self._apply_update_card_state(build_update_failure_state(message))
         self._refresh_update_card_state = lambda: self._show_update_failure_state(message)
 
     def _show_downloading_state(self, *, name: str, meta: str, note: str | None = None) -> None:
-        note_text = note or _tr("正在下载 {name}。").format(name=name)
-        self.update_card.set_state(
-            _tr("正在下载更新"),
-            note_text,
-            meta,
-            can_open_release=False,
-            can_replace=False,
+        self._apply_update_card_state(
+            build_downloading_state(
+                name=name,
+                note=TextSpec(note) if note is not None else None,
+                meta=TextSpec(meta),
+            )
         )
         self._refresh_update_card_state = lambda: self._show_downloading_state(
             name=name,
             meta=meta,
-            note=note_text,
+            note=note or _tr("正在下载 {name}。").format(name=name),
         )
 
     def _show_downloaded_state(self, *, filename: str) -> None:
-        self.update_card.set_state(
-            _tr("更新已下载完成"),
-            _tr("正在退出当前程序并应用新版本。"),
-            _tr("目标文件：{filename}  程序将自动重新启动。").format(filename=filename),
-            can_open_release=False,
-            can_replace=False,
-        )
+        self._apply_update_card_state(build_downloaded_state(filename=filename))
         self._refresh_update_card_state = lambda: self._show_downloaded_state(filename=filename)
 
     def _show_download_failed_state(self, message: str) -> None:
-        self.update_card.set_state(
-            _tr("下载更新失败"),
-            message,
-            _tr("你仍然可以打开 Release 页面手动下载。"),
-            can_open_release=True,
-            can_replace=self._binary_update_supported and self._latest_asset is not None,
+        self._apply_update_card_state(
+            build_download_failed_state(
+                message,
+                binary_update_supported=self._binary_update_supported,
+                has_asset=self._latest_asset is not None,
+            )
         )
         self._refresh_update_card_state = lambda: self._show_download_failed_state(message)
 
@@ -356,11 +323,7 @@ class AboutUpdateController:
         release = result.latest_release
         self._release_url = release.html_url
         self._latest_asset = release.asset
-        asset_note = (
-            _tr("下载文件：{name}").format(name=release.asset.name)
-            if release.asset is not None
-            else _tr("该 Release 未找到匹配的二进制资产，将打开发布页面。")
-        )
+        asset_note = build_asset_note(release.asset.name if release.asset is not None else None)
         can_replace = bool(result.update_available and self._binary_update_supported and release.asset is not None)
         replace_note = ""
         if can_replace and self._binary_updater is not None:
@@ -399,11 +362,11 @@ class AboutUpdateController:
             )
         )
         if is_dev_build:
-            commit_note = ""
+            commit_note: TextSpec | None = None
             if release.commit_sha:
-                commit_note = _tr("  当前 Commit：{current_commit}  Release Commit：{release_commit}").format(
-                    current_commit=self._short_commit(self._build_info.commit_sha),
-                    release_commit=self._short_commit(release.commit_sha),
+                commit_note = build_commit_note(
+                    self._short_commit(self._build_info.commit_sha),
+                    self._short_commit(release.commit_sha),
                 )
             self._latest_asset = None
             self._show_dev_build_state(
@@ -484,6 +447,24 @@ class AboutUpdateController:
             return
         self.update_card.check_button.setEnabled(True)
         self.update_card.release_button.setEnabled(True)
+
+    def _apply_update_card_state(self, view_model: UpdateCardViewModel) -> None:
+        self.update_card.set_state(
+            self._render_text(view_model.title),
+            self._render_text(view_model.note),
+            self._render_text(view_model.meta),
+            can_open_release=view_model.can_open_release,
+            can_replace=view_model.can_replace,
+        )
+
+    def _render_text(self, spec: TextSpec) -> str:
+        if not spec.args:
+            return _tr(spec.source)
+        rendered_args = {
+            key: self._render_text(value) if isinstance(value, TextSpec) else value
+            for key, value in spec.args.items()
+        }
+        return _tr(spec.source).format(**rendered_args)
 
     @staticmethod
     def _format_bytes(value: int) -> str:

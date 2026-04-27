@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from open_router_key_viewer.state import build_query_result_view_model
+from open_router_key_viewer.state import QueryState, build_query_page_render_model, build_query_result_view_model
 
 
 def test_key_info_view_model_formats_core_rows() -> None:
@@ -47,3 +47,22 @@ def test_unknown_query_mode_returns_empty_view_model() -> None:
 
     assert view_model.hero_title == "结果"
     assert view_model.rows == [("状态", "无数据", "")]
+
+
+def test_query_page_render_model_uses_query_state() -> None:
+    state = QueryState("credits")
+    state.succeed(
+        {
+            "summary": {"remaining_credits": 10.0},
+            "http_meta": {"request": {"method": "GET"}, "response": {"status": 200}},
+            "raw_response": {"data": {"remaining_credits": 10.0}},
+        },
+        "2026-04-27 10:00:00",
+    )
+
+    view_model = build_query_page_render_model("credits", state)
+
+    assert view_model.status == "success"
+    assert view_model.hero_value == "$10.0000"
+    assert view_model.last_success_time == "2026-04-27 10:00:00"
+    assert '"method": "GET"' in view_model.raw_http_text

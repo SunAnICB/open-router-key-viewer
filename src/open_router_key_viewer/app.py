@@ -20,13 +20,15 @@ with redirect_stdout(io.StringIO()):
 from open_router_key_viewer import __version__
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.config_store import ConfigStore
+from open_router_key_viewer.services.runtime_settings import RuntimeSettingsService
 from open_router_key_viewer.services.single_instance import SingleInstanceManager
 from open_router_key_viewer.state import QueryState
+from open_router_key_viewer.state.app_metadata import APP_DISPLAY_NAME
 from open_router_key_viewer.ui.controllers.shell_controller import WindowShellController
 from open_router_key_viewer.ui.pages.about_page import AboutPage
 from open_router_key_viewer.ui.pages.query_pages import CreditsPage, KeyInfoPage
 from open_router_key_viewer.ui.pages.settings_page import CachePage
-from open_router_key_viewer.ui.runtime import APP_DISPLAY_NAME, apply_theme_mode, install_language
+from open_router_key_viewer.ui.runtime import apply_theme_mode, install_language
 
 _tr = tr
 
@@ -35,6 +37,7 @@ class MainWindow(FluentWindow):
     def __init__(self) -> None:
         super().__init__()
         self.config_store = ConfigStore()
+        self.runtime_settings = RuntimeSettingsService(self.config_store)
         self._shutting_down = False
         self.key_query_state = QueryState("key-info")
         self.credits_query_state = QueryState("credits")
@@ -160,7 +163,7 @@ class MainWindow(FluentWindow):
         self.move(x, y)
 
     def _run_startup_queries(self) -> None:
-        config = self.config_store.load_config()
+        config = self.runtime_settings.current_config()
         if config.auto_check_updates:
             self.about_page.check_updates_silently()
         if config.auto_query_key_info and config.api_key:
@@ -170,7 +173,7 @@ class MainWindow(FluentWindow):
         self._apply_polling_settings()
 
     def _apply_polling_settings(self) -> None:
-        config = self.config_store.load_config()
+        config = self.runtime_settings.current_config()
         self._apply_timer(
             self.key_timer,
             config.poll_key_info_enabled and bool(config.api_key),
@@ -211,13 +214,13 @@ class MainWindow(FluentWindow):
         QApplication.instance().quit()
 
     def _single_instance_enabled(self) -> bool:
-        return self.config_store.load_config().single_instance_enabled
+        return self.runtime_settings.current_config().single_instance_enabled
 
     def _background_resident_on_close_enabled(self) -> bool:
-        return self.config_store.load_config().background_resident_on_close
+        return self.runtime_settings.current_config().background_resident_on_close
 
-    def handle_query_success(self, mode: str, payload: dict[str, object]) -> None:
-        self.shell_controller.handle_query_success(mode, payload)
+    def handle_query_success(self, mode: str, summary: dict[str, object]) -> None:
+        self.shell_controller.handle_query_success(mode, summary)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if (
@@ -241,7 +244,7 @@ def main() -> int:
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
     config_store = ConfigStore()
-    config = config_store.load_config()
+    config = RuntimeSettingsService(config_store).current_config()
     single_instance_manager: SingleInstanceManager | None = None
     if config.single_instance_enabled:
         single_instance_manager = SingleInstanceManager(parent=app)

@@ -7,8 +7,7 @@ from datetime import datetime
 from urllib.request import Request, urlopen
 
 from open_router_key_viewer.state import AppConfig
-
-DISPLAY_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+from open_router_key_viewer.state.app_metadata import DISPLAY_DATETIME_FORMAT
 
 
 @dataclass(frozen=True, slots=True)

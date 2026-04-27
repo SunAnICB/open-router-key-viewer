@@ -29,14 +29,17 @@ with redirect_stdout(io.StringIO()):
 
 from open_router_key_viewer.i18n import LANGUAGE_OPTIONS, tr
 from open_router_key_viewer.services.config_store import ConfigStore, ConfigStoreError
-from open_router_key_viewer.state import ConfigKey, config_display_rows
+from open_router_key_viewer.services.settings_snapshot import SettingsSnapshotService
+from open_router_key_viewer.state import ConfigKey
+from open_router_key_viewer.state.app_metadata import DISPLAY_BACKEND_OPTIONS, THEME_MODE_OPTIONS
+from open_router_key_viewer.state.settings_view_model import SettingsSnapshotViewModel
 from open_router_key_viewer.ui.pages.settings_widgets import (
     AutoQuerySettingRow,
     InputSettingRow,
     PropertyRowsPanel,
     SwitchSettingRow,
 )
-from open_router_key_viewer.ui.runtime import THEME_MODE_OPTIONS, DISPLAY_BACKEND_OPTIONS, show_error_bar
+from open_router_key_viewer.ui.runtime import show_error_bar
 from open_router_key_viewer.ui.widgets import MetricCard, PathActionCard, WarningCard
 
 _tr = tr
@@ -113,7 +116,6 @@ class CachePage(QWidget):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("cache-page")
-        self.config_store = config_store
         self.on_runtime_settings_changed = on_runtime_settings_changed
         self.on_global_config_changed = on_global_config_changed
         self.on_language_changed = on_language_changed
@@ -123,6 +125,7 @@ class CachePage(QWidget):
         self.indicator_available = indicator_available
         self._mode = "data"
         self._file_text = ""
+        self._snapshot_service = SettingsSnapshotService(config_store)
         self._switch_rows: dict[ConfigKey, SwitchSettingRow] = {}
         self._input_rows: dict[ConfigKey, InputSettingRow] = {}
         self._auto_query_rows: list[tuple[AutoQueryBinding, AutoQuerySettingRow]] = []
@@ -460,30 +463,9 @@ class CachePage(QWidget):
         self.indicator_switch_row.setEnabled(self.indicator_available)
 
     def refresh_view(self) -> None:
-        snapshot = self.config_store.inspect()
-        raw_config = snapshot.get("loaded_config")
-        payload = raw_config if isinstance(raw_config, dict) else {}
-        config = self.config_store.load_config()
-        files = snapshot.get("files", [])
-        file_count = sum(1 for item in files if item.get("type") == "file")
-        entry_count = len(payload)
-
-        self.dir_exists_card.set_content(
-            _tr("已存在") if snapshot["dir_exists"] else _tr("不存在"),
-            _tr("缓存目录路径"),
-            str(snapshot["config_dir"]),
-            bool(snapshot["dir_exists"]),
-        )
-        self.config_exists_card.set_content(
-            _tr("已存在") if snapshot["config_exists"] else _tr("不存在"),
-            _tr("config.json 文件路径"),
-            str(snapshot["config_path"]),
-            bool(snapshot["config_exists"]),
-        )
-        self.entry_count_card.set_value(str(entry_count), _tr("当前解析出的缓存键数量"))
-        self.file_count_card.set_value(str(file_count), _tr("缓存目录内的文件数量"))
-
-        self.status_label.setText(_tr("已解析本地缓存") if snapshot["config_exists"] else _tr("未找到配置文件"))
+        snapshot_view = self._snapshot_service.build()
+        config = snapshot_view.config
+        self._apply_snapshot_view(snapshot_view)
         self._sync_display_backend_combo(config.display_backend)
         self._sync_language_combo(config.ui_language)
         self._sync_theme_mode_combo(config.theme_mode)
@@ -500,10 +482,27 @@ class CachePage(QWidget):
         for key, row in self._input_rows.items():
             row.sync_value(getattr(config, key.value))
 
-        self._render_parsed_data(payload)
-        self._file_text = self.config_store.read_raw_config() or _tr("未找到 config.json 文件")
+        self._file_text = _tr(snapshot_view.raw_file_text)
         self.content_output.setPlainText(self._file_text)
         self._show_mode(self._mode)
+
+    def _apply_snapshot_view(self, view_model: SettingsSnapshotViewModel) -> None:
+        self.dir_exists_card.set_content(
+            _tr(view_model.directory.status),
+            _tr(view_model.directory.note),
+            view_model.directory.path,
+            view_model.directory.exists,
+        )
+        self.config_exists_card.set_content(
+            _tr(view_model.config_file.status),
+            _tr(view_model.config_file.note),
+            view_model.config_file.path,
+            view_model.config_file.exists,
+        )
+        self.entry_count_card.set_value(view_model.entry_count.value, _tr(view_model.entry_count.note))
+        self.file_count_card.set_value(view_model.file_count.value, _tr(view_model.file_count.note))
+        self.status_label.setText(_tr(view_model.status))
+        self.parsed_rows.set_rows([(_tr(label), _tr(value), _tr(note)) for label, value, note in view_model.parsed_rows])
 
     def _sync_display_backend_combo(self, backend: str) -> None:
         index = self.display_backend_combo.findData(backend)
@@ -526,14 +525,14 @@ class CachePage(QWidget):
         backend = self.display_backend_combo.currentData()
         if not isinstance(backend, str):
             return
-        current_backend = self.config_store.load_config().display_backend
+        current_backend = self._snapshot_service.current_config().display_backend
         if backend == current_backend:
             return
         try:
             if backend == "auto":
-                self.config_store.delete_value(ConfigKey.DISPLAY_BACKEND)
+                self._snapshot_service.delete_value(ConfigKey.DISPLAY_BACKEND)
             else:
-                self.config_store.save_config_value(ConfigKey.DISPLAY_BACKEND, backend)
+                self._snapshot_service.save_value(ConfigKey.DISPLAY_BACKEND, backend)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -562,11 +561,11 @@ class CachePage(QWidget):
         language_code = self.language_combo.currentData()
         if not isinstance(language_code, str):
             return
-        current_language = self.config_store.load_config().ui_language
+        current_language = self._snapshot_service.current_config().ui_language
         if language_code == current_language:
             return
         try:
-            self.config_store.save_config_value(ConfigKey.UI_LANGUAGE, language_code)
+            self._snapshot_service.save_value(ConfigKey.UI_LANGUAGE, language_code)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -585,14 +584,14 @@ class CachePage(QWidget):
         theme_mode = self.theme_mode_combo.currentData()
         if not isinstance(theme_mode, str):
             return
-        current_theme_mode = self.config_store.load_config().theme_mode
+        current_theme_mode = self._snapshot_service.current_config().theme_mode
         if theme_mode == current_theme_mode:
             return
         try:
             if theme_mode == "auto":
-                self.config_store.delete_value(ConfigKey.THEME_MODE)
+                self._snapshot_service.delete_value(ConfigKey.THEME_MODE)
             else:
-                self.config_store.save_config_value(ConfigKey.THEME_MODE, theme_mode)
+                self._snapshot_service.save_value(ConfigKey.THEME_MODE, theme_mode)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -604,13 +603,6 @@ class CachePage(QWidget):
         self.parsed_container.setVisible(showing_data)
         self.content_output.setVisible(not showing_data)
         self.content_mode_switch.setCurrentItem(mode)
-
-    def _render_parsed_data(self, loaded_config: object) -> None:
-        if not isinstance(loaded_config, dict) or not loaded_config:
-            rows = [(_tr("状态"), _tr("暂无数据"), "")]
-        else:
-            rows = [(_tr(label), _tr(value), note) for label, value, note in config_display_rows(loaded_config)]
-        self.parsed_rows.set_rows(rows)
 
     def _create_switch_row(self, text: str, config_key: ConfigKey, parent: QWidget) -> SwitchSettingRow:
         row = SwitchSettingRow(
@@ -653,7 +645,7 @@ class CachePage(QWidget):
 
     def _toggle_switch_value(self, config_key: ConfigKey, checked: bool) -> None:
         try:
-            self.config_store.save_config_value(config_key, checked)
+            self._snapshot_service.save_value(config_key, checked)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -669,7 +661,7 @@ class CachePage(QWidget):
     def _save_input_value(self, config_key: ConfigKey, raw_value: str) -> None:
         try:
             if not raw_value:
-                self.config_store.delete_value(config_key)
+                self._snapshot_service.delete_value(config_key)
             else:
                 value: object = raw_value
                 if config_key in {ConfigKey.POLL_KEY_INFO_INTERVAL_SECONDS, ConfigKey.POLL_CREDITS_INTERVAL_SECONDS}:
@@ -689,7 +681,7 @@ class CachePage(QWidget):
                     except ValueError:
                         self._show_error(_tr("阈值必须是数字"))
                         return
-                self.config_store.save_config_value(config_key, value)
+                self._snapshot_service.save_value(config_key, value)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -713,7 +705,7 @@ class CachePage(QWidget):
         if not self._confirm(_tr("删除配置文件"), _tr("确认删除 config.json 吗？")):
             return
         try:
-            self.config_store.delete_config_file()
+            self._snapshot_service.delete_config_file()
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -732,7 +724,7 @@ class CachePage(QWidget):
         if not self._confirm(_tr("删除缓存目录"), _tr("确认删除整个 ~/.config/open-router-key-viewer 目录吗？")):
             return
         try:
-            self.config_store.delete_config_dir()
+            self._snapshot_service.delete_config_dir()
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return

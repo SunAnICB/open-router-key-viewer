@@ -16,7 +16,8 @@ with redirect_stdout(io.StringIO()):
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.installer import AppInstallError, AppInstaller
 from open_router_key_viewer.state import InstallCardViewModel, TextSpec, build_install_state
-from open_router_key_viewer.ui.runtime import APP_DISPLAY_NAME, show_error_bar
+from open_router_key_viewer.state.app_metadata import APP_DISPLAY_NAME
+from open_router_key_viewer.ui.runtime import show_error_bar
 from open_router_key_viewer.ui.widgets import InstallCard
 
 _tr = tr

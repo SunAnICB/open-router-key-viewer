@@ -26,8 +26,7 @@ with redirect_stdout(io.StringIO()):
     )
 
 from open_router_key_viewer.i18n import tr
-
-from .runtime import APP_DISPLAY_NAME
+from open_router_key_viewer.state.app_metadata import APP_DISPLAY_NAME
 
 _tr = tr
 

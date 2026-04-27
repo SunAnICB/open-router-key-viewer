@@ -16,8 +16,9 @@ with redirect_stdout(io.StringIO()):
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.alert_service import AlertEvent, AlertService
 from open_router_key_viewer.services.config_store import ConfigStore
-from open_router_key_viewer.state import QueryState
-from open_router_key_viewer.ui.runtime import APP_DISPLAY_NAME, format_currency_value
+from open_router_key_viewer.services.runtime_settings import RuntimeSettingsService
+from open_router_key_viewer.state import FloatingMetricsState, QueryState
+from open_router_key_viewer.state.app_metadata import APP_DISPLAY_NAME
 from open_router_key_viewer.ui.widgets import FloatingWindow
 
 try:
@@ -42,7 +43,6 @@ class WindowShellController:
         quit_application: Callable[[], None],
     ) -> None:
         self.host = host
-        self.config_store = config_store
         self.key_query_state = key_query_state
         self.credits_query_state = credits_query_state
         self._refresh_floating_metrics_callback = refresh_floating_metrics
@@ -50,15 +50,13 @@ class WindowShellController:
         self._floating_window_supported = self._is_x11_platform()
         self._indicator_available = self._check_indicator_available()
         self._alert_service = AlertService()
+        self._runtime_settings = RuntimeSettingsService(config_store)
         self._tray_icon: QSystemTrayIcon | None = None
         self._sni_tray: SNITray | None = None  # type: ignore[assignment]
         self._panel_label_timer: QTimer | None = None
         self._panel_label_phase = 0
         self._background_hint_shown = False
-        self._floating_key_value = "-"
-        self._floating_key_time = "-"
-        self._floating_credits_value = "-"
-        self._floating_credits_time = "-"
+        self._floating_metrics = FloatingMetricsState()
         self.floating_window: FloatingWindow | None = None
         if self._floating_window_supported:
             self.floating_window = self._create_floating_window(topmost=True)
@@ -72,8 +70,7 @@ class WindowShellController:
         return self._indicator_available
 
     def setup_indicator(self) -> None:
-        config = self.config_store.load_config()
-        if self._indicator_available and config.panel_indicator_enabled:
+        if self._indicator_available and self._runtime_settings.panel_indicator_enabled():
             sni = SNITray(
                 activate=self.show_full_window,
                 refresh=self._refresh_floating_metrics_callback,
@@ -88,8 +85,7 @@ class WindowShellController:
         self._setup_tray_icon()
 
     def apply_indicator_settings(self) -> None:
-        config = self.config_store.load_config()
-        want_enabled = self._indicator_available and config.panel_indicator_enabled
+        want_enabled = self._indicator_available and self._runtime_settings.panel_indicator_enabled()
 
         if self._sni_tray is None or not self._sni_tray.is_active:
             if want_enabled:
@@ -178,10 +174,7 @@ class WindowShellController:
         self._background_hint_shown = True
         return True
 
-    def handle_query_success(self, mode: str, payload: dict[str, object]) -> None:
-        summary = payload.get("summary", {})
-        if not isinstance(summary, dict):
-            return
+    def handle_query_success(self, mode: str, summary: dict[str, object]) -> None:
         self._update_floating_metrics(mode, summary)
         self._evaluate_thresholds(mode, summary)
 
@@ -239,7 +232,11 @@ class WindowShellController:
     def _sync_panel_label(self) -> None:
         if self._sni_tray is None or not self._sni_tray.is_active:
             return
-        text = f"{_tr('配额')} {self._floating_key_value}" if self._panel_label_phase == 0 else f"{_tr('余额')} {self._floating_credits_value}"
+        text = (
+            f"{_tr('配额')} {self._floating_metrics.key_value}"
+            if self._panel_label_phase == 0
+            else f"{_tr('余额')} {self._floating_metrics.credits_value}"
+        )
         self._sni_tray.set_label(text, f"{_tr('余额')} $99.9999")
 
     def _create_floating_window(self, topmost: bool) -> FloatingWindow:
@@ -277,26 +274,26 @@ class WindowShellController:
             new_window.activateWindow()
 
     def _update_floating_metrics(self, mode: str, summary: dict[str, object]) -> None:
-        if mode == "key-info":
-            self._floating_key_value = format_currency_value(summary.get("limit_remaining"))
-            self._floating_key_time = self.key_query_state.last_success_time
-        else:
-            self._floating_credits_value = format_currency_value(summary.get("remaining_credits"))
-            self._floating_credits_time = self.credits_query_state.last_success_time
+        success_time = (
+            self.key_query_state.last_success_time
+            if mode == "key-info"
+            else self.credits_query_state.last_success_time
+        )
+        self._floating_metrics.update(mode, summary, success_time)
         self._sync_floating_window()
 
     def _sync_floating_window(self) -> None:
         if self.floating_window is not None:
             self.floating_window.update_metrics(
-                self._floating_key_value,
-                self._floating_key_time,
-                self._floating_credits_value,
-                self._floating_credits_time,
+                self._floating_metrics.key_value,
+                self._floating_metrics.key_time,
+                self._floating_metrics.credits_value,
+                self._floating_metrics.credits_time,
             )
         self._sync_panel_label()
 
     def _evaluate_thresholds(self, mode: str, summary: dict[str, object]) -> None:
-        config = self.config_store.load_config()
+        config = self._runtime_settings.current_config()
         event = self._alert_service.evaluate(mode, summary, config)
         if event is None:
             return

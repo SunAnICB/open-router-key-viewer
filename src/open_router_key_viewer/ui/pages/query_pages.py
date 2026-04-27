@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import json
 from collections.abc import Callable
 from contextlib import redirect_stdout
 from datetime import datetime
@@ -20,11 +19,19 @@ with redirect_stdout(io.StringIO()):
 
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.config_store import ConfigStore, ConfigStoreError
-from open_router_key_viewer.state import QueryState, build_query_result_view_model
+from open_router_key_viewer.services.secret_cache import SecretCacheService
+from open_router_key_viewer.state import (
+    QueryPageRenderModel,
+    QueryState,
+    build_initial_raw_http_text,
+    build_loading_raw_http_text,
+    build_query_page_render_model,
+    normalize_query_error,
+)
+from open_router_key_viewer.state.app_metadata import DISPLAY_DATETIME_FORMAT
 from open_router_key_viewer.ui.controllers.query_controller import QueryExecutionController
 from open_router_key_viewer.ui.pages.query_widgets import QueryResultCard, SecretInputCard
 from open_router_key_viewer.ui.runtime import (
-    DISPLAY_DATETIME_FORMAT,
     show_error_bar,
 )
 
@@ -51,7 +58,7 @@ class BaseQueryPage(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.config_store = config_store
+        self.secret_cache = SecretCacheService(config_store)
         self.query_state = query_state
         self.on_cache_changed = on_cache_changed
         self.on_query_success = on_query_success
@@ -121,12 +128,9 @@ class BaseQueryPage(QWidget):
         self.detail_card = self.result_card.detail_card
         self.result_output = self.result_card.result_output
         self.query_button.clicked.connect(self._query)
-        self.result_output.setPlainText(
-            json.dumps({"message": _tr("在上方输入 key 后开始查询")}, ensure_ascii=False, indent=2)
-        )
         root.addWidget(self.result_card, 1)
         self._show_result_mode("summary")
-        self._render_summary_placeholder()
+        self._render_query_state(raw_http_text=build_initial_raw_http_text(_tr("在上方输入 key 后开始查询")))
 
     def _set_busy(self, busy: bool, message: str) -> None:
         _ = message
@@ -147,7 +151,7 @@ class BaseQueryPage(QWidget):
             return
 
         try:
-            self.config_store.save_config_value(self.config_key, secret)
+            self.secret_cache.save_secret(self.config_key, secret)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -198,7 +202,7 @@ class BaseQueryPage(QWidget):
 
     def _clear_saved_secret(self) -> None:
         try:
-            self.config_store.delete_value(self.config_key)
+            self.secret_cache.delete_secret(self.config_key)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -225,17 +229,13 @@ class BaseQueryPage(QWidget):
         self._set_busy(True, _tr("查询中..."))
         self.query_state.start()
         self.status_badge.set_status("loading", _tr("查询中"))
-        self._render_summary_placeholder(_tr("查询中..."))
-        self.result_output.setPlainText("{\n  \"loading\": true\n}")
+        self._render_query_state(raw_http_text=build_loading_raw_http_text())
 
     def _handle_success(self, payload: dict) -> None:
         self.query_state.succeed(payload, datetime.now().strftime(DISPLAY_DATETIME_FORMAT))
-        self._update_time_label()
-        self.status_badge.set_status("success", _tr("查询成功"))
-        self._render_summary()
+        self._render_query_state()
         if self.on_query_success:
-            self.on_query_success(self.mode, payload)
-        self._render_raw_http()
+            self.on_query_success(self.mode, self.query_state.summary)
         InfoBar.success(
             title=_tr("请求成功"),
             content=_tr("OpenRouter 返回了查询结果"),
@@ -247,19 +247,9 @@ class BaseQueryPage(QWidget):
         )
 
     def _handle_failure(self, error: object) -> None:
-        if isinstance(error, dict):
-            message = str(error.get("message") or _tr("请求失败"))
-            http_meta = error.get("http_meta")
-            raw_payload = error.get("raw_response")
-        else:
-            message = str(error)
-            http_meta = {}
-            raw_payload = {"error": message}
+        message, http_meta, raw_payload = normalize_query_error(error, _tr("请求失败"))
         self.query_state.fail(message, http_meta=http_meta, raw_response=raw_payload)
-        self._update_time_label()
-        self.status_badge.set_status("error", _tr("查询失败"))
-        self._render_summary_placeholder(_tr("查询失败"))
-        self._render_raw_http()
+        self._render_query_state()
         self._show_error(message)
 
     def _handle_finished(self) -> None:
@@ -271,50 +261,39 @@ class BaseQueryPage(QWidget):
     def _show_result_mode(self, mode: str) -> None:
         self.result_card.show_mode(mode)
 
-    def _render_summary_placeholder(self, message: str = "等待查询") -> None:
-        self.hero_card.set_content(_tr("状态"), message, _tr("查询成功后会在这里显示关键结果"))
-        self.detail_card.set_rows([(_tr("说明"), _tr("暂无结果"), _tr("先输入 key，再执行查询"))])
+    def _render_query_state(self, raw_http_text: str | None = None) -> None:
+        view_model = build_query_page_render_model(self.mode, self.query_state)
+        self._apply_query_render_model(view_model, raw_http_text=raw_http_text)
 
-    def _render_summary(self) -> None:
-        view_model = build_query_result_view_model(self.mode, self.query_state.summary)
-        self.hero_card.set_content(_tr(view_model.hero_title), view_model.hero_value, _tr(view_model.hero_note))
-        self.detail_card.set_rows([(_tr(label), value, _tr(note)) for label, value, note in view_model.rows])
-
-    def _render_raw_http(self) -> None:
-        self.result_output.setPlainText(
-            json.dumps(self.query_state.raw_http_payload(), ensure_ascii=False, indent=2)
+    def _apply_query_render_model(self, view_model: QueryPageRenderModel, *, raw_http_text: str | None = None) -> None:
+        self.status_badge.set_status(view_model.status, _tr(view_model.status_message))
+        self.hero_card.set_content(_tr(view_model.hero_title), _tr(view_model.hero_value), _tr(view_model.hero_note))
+        self.detail_card.set_rows([(_tr(label), _tr(value), _tr(note)) for label, value, note in view_model.rows])
+        self.result_output.setPlainText(raw_http_text or view_model.raw_http_text)
+        self.time_label.setText(
+            _tr("最近成功: -")
+            if view_model.last_success_time == "-"
+            else f"{_tr('最近成功:')} {view_model.last_success_time}"
         )
-
-    def _update_time_label(self) -> None:
-        if self.query_state.last_success_time == "-":
-            self.time_label.setText(_tr("最近成功: -"))
-            return
-        self.time_label.setText(f"{_tr('最近成功:')} {self.query_state.last_success_time}")
 
     def retranslate_ui(self) -> None:
         self.title_label.setText(_tr(self.page_title))
         self.input_card.retranslate_ui(_tr(self.input_label), _tr(self.input_placeholder))
         self.result_card.retranslate_ui(_tr(self.button_text))
-        self._update_time_label()
-        if self.query_state.summary:
-            self._render_summary()
-        else:
-            self._render_summary_placeholder(self.status_badge.title_label.text())
-            if not self.query_state.raw_response:
-                self.result_output.setPlainText(
-                    json.dumps({"message": _tr("在上方输入 key 后开始查询")}, ensure_ascii=False, indent=2)
-                )
+        self._render_query_state(
+            raw_http_text=(
+                build_initial_raw_http_text(_tr("在上方输入 key 后开始查询"))
+                if self.query_state.status == "idle"
+                else None
+            )
+        )
 
     def load_cached_secret(self) -> None:
-        config = self.config_store.load_config()
-        cached = getattr(config, self.config_key, "")
+        cached = self.secret_cache.load_secret(self.config_key)
         if not cached:
             self.secret_input.clear()
             return
-        if isinstance(cached, str):
-            self.secret_input.setText(cached)
-        else:
-            self.secret_input.clear()
+        self.secret_input.setText(cached)
 
     def auto_query_if_possible(self) -> None:
         secret = self.secret_input.text().strip()

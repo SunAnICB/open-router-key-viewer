@@ -42,10 +42,12 @@ from open_router_key_viewer.state import (
     build_update_failure_state,
     build_update_intro_state,
 )
-from open_router_key_viewer.ui.runtime import (
+from open_router_key_viewer.state.app_metadata import (
     APP_REPOSITORY_URL,
     BINARY_ASSET_NAME,
     DISPLAY_DATETIME_FORMAT,
+)
+from open_router_key_viewer.ui.runtime import (
     UpdateCheckWorker,
     UpdateInstallWorker,
     disconnect_signal,

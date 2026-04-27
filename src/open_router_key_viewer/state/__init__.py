@@ -16,13 +16,24 @@ from open_router_key_viewer.state.card_view_model import (
     build_update_failure_state,
     build_update_intro_state,
 )
+from open_router_key_viewer.state.floating_metrics import FloatingMetricsState
 from open_router_key_viewer.state.query_state import QueryState
-from open_router_key_viewer.state.query_view_model import QueryResultViewModel, build_query_result_view_model
+from open_router_key_viewer.state.query_view_model import (
+    QueryPageRenderModel,
+    QueryResultViewModel,
+    build_initial_raw_http_text,
+    build_loading_raw_http_text,
+    build_query_page_render_model,
+    build_query_result_view_model,
+    normalize_query_error,
+)
 
 __all__ = [
     "AppConfig",
     "ConfigKey",
+    "FloatingMetricsState",
     "InstallCardViewModel",
+    "QueryPageRenderModel",
     "QueryResultViewModel",
     "QueryState",
     "TextSpec",
@@ -34,11 +45,15 @@ __all__ = [
     "build_downloaded_state",
     "build_downloading_state",
     "build_install_state",
+    "build_initial_raw_http_text",
     "build_latest_state",
+    "build_loading_raw_http_text",
+    "build_query_page_render_model",
     "build_query_result_view_model",
     "build_update_available_state",
     "build_update_checking_state",
     "build_update_failure_state",
     "build_update_intro_state",
     "config_display_rows",
+    "normalize_query_error",
 ]

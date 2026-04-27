@@ -19,8 +19,6 @@ with redirect_stdout(io.StringIO()):
 from open_router_key_viewer.core.query_coordinator import QueryCoordinator
 from open_router_key_viewer.core.secret_coordinator import SecretCoordinator
 from open_router_key_viewer.i18n import tr
-from open_router_key_viewer.services.config_store import ConfigStore
-from open_router_key_viewer.services.secret_cache import SecretCacheService
 from open_router_key_viewer.state import (
     QueryPageRenderModel,
     QueryState,
@@ -49,14 +47,14 @@ class BaseQueryPage(QWidget):
 
     def __init__(
         self,
-        config_store: ConfigStore,
+        secret_coordinator: SecretCoordinator,
         query_state: QueryState,
         on_cache_changed: Callable[[], None],
         on_query_success: Callable[[str, dict[str, object]], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.secret_coordinator = SecretCoordinator(SecretCacheService(config_store))
+        self.secret_coordinator = secret_coordinator
         self.query_state = query_state
         self.on_cache_changed = on_cache_changed
         self.on_query_success = on_query_success
@@ -313,13 +311,13 @@ class KeyInfoPage(BaseQueryPage):
 
     def __init__(
         self,
-        config_store: ConfigStore,
+        secret_coordinator: SecretCoordinator,
         query_state: QueryState,
         on_cache_changed: Callable[[], None],
         on_query_success: Callable[[str, dict[str, object]], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(config_store, query_state, on_cache_changed, on_query_success, parent)
+        super().__init__(secret_coordinator, query_state, on_cache_changed, on_query_success, parent)
         self.setObjectName("key-info-page")
 
 
@@ -335,11 +333,11 @@ class CreditsPage(BaseQueryPage):
 
     def __init__(
         self,
-        config_store: ConfigStore,
+        secret_coordinator: SecretCoordinator,
         query_state: QueryState,
         on_cache_changed: Callable[[], None],
         on_query_success: Callable[[str, dict[str, object]], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(config_store, query_state, on_cache_changed, on_query_success, parent)
+        super().__init__(secret_coordinator, query_state, on_cache_changed, on_query_success, parent)
         self.setObjectName("credits-page")

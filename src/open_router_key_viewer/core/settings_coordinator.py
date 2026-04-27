@@ -6,6 +6,7 @@ from typing import Any, Literal
 from open_router_key_viewer.services.config_store import ConfigStoreError
 from open_router_key_viewer.services.settings_snapshot import SettingsSnapshotService
 from open_router_key_viewer.state import AppConfig, ConfigKey
+from open_router_key_viewer.state.settings_view_model import SettingsSnapshotViewModel
 
 SettingsEffect = Literal["runtime", "language", "theme", "global"]
 
@@ -28,6 +29,9 @@ class SettingsCoordinator:
 
     def current_config(self) -> AppConfig:
         return self.snapshot_service.current_config()
+
+    def build_snapshot(self) -> SettingsSnapshotViewModel:
+        return self.snapshot_service.build()
 
     def set_display_backend(self, backend: str) -> SettingsActionResult:
         current_backend = self.current_config().display_backend

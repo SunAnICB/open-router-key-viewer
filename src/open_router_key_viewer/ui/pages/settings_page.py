@@ -29,8 +29,6 @@ with redirect_stdout(io.StringIO()):
 
 from open_router_key_viewer.core.settings_coordinator import SettingsActionResult, SettingsCoordinator
 from open_router_key_viewer.i18n import LANGUAGE_OPTIONS, tr
-from open_router_key_viewer.services.config_store import ConfigStore
-from open_router_key_viewer.services.settings_snapshot import SettingsSnapshotService
 from open_router_key_viewer.state import ConfigKey
 from open_router_key_viewer.state.app_metadata import DISPLAY_BACKEND_OPTIONS, THEME_MODE_OPTIONS
 from open_router_key_viewer.state.settings_view_model import SettingsSnapshotViewModel
@@ -105,7 +103,7 @@ ALERT_INPUT_BINDINGS = (
 class CachePage(QWidget):
     def __init__(
         self,
-        config_store: ConfigStore,
+        settings_coordinator: SettingsCoordinator,
         on_runtime_settings_changed: Callable[[], None],
         on_global_config_changed: Callable[[], None],
         on_language_changed: Callable[[str], None],
@@ -126,8 +124,7 @@ class CachePage(QWidget):
         self.indicator_available = indicator_available
         self._mode = "data"
         self._file_text = ""
-        self._snapshot_service = SettingsSnapshotService(config_store)
-        self._settings_coordinator = SettingsCoordinator(self._snapshot_service)
+        self._settings_coordinator = settings_coordinator
         self._switch_rows: dict[ConfigKey, SwitchSettingRow] = {}
         self._input_rows: dict[ConfigKey, InputSettingRow] = {}
         self._auto_query_rows: list[tuple[AutoQueryBinding, AutoQuerySettingRow]] = []
@@ -465,7 +462,7 @@ class CachePage(QWidget):
         self.indicator_switch_row.setEnabled(self.indicator_available)
 
     def refresh_view(self) -> None:
-        snapshot_view = self._snapshot_service.build()
+        snapshot_view = self._settings_coordinator.build_snapshot()
         config = snapshot_view.config
         self._apply_snapshot_view(snapshot_view)
         self._sync_display_backend_combo(config.display_backend)

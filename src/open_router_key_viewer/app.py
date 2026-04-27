@@ -19,11 +19,13 @@ with redirect_stdout(io.StringIO()):
 
 from open_router_key_viewer import __version__
 from open_router_key_viewer.core.app_kernel import AppKernel
+from open_router_key_viewer.core.bootstrap import (
+    AppContext,
+    create_app_context,
+    create_single_instance_manager,
+    load_startup_config,
+)
 from open_router_key_viewer.i18n import tr
-from open_router_key_viewer.services.config_store import ConfigStore
-from open_router_key_viewer.services.runtime_settings import RuntimeSettingsService
-from open_router_key_viewer.services.single_instance import SingleInstanceManager
-from open_router_key_viewer.state import QueryState
 from open_router_key_viewer.state.app_metadata import APP_DISPLAY_NAME
 from open_router_key_viewer.ui.controllers.shell_controller import WindowShellController
 from open_router_key_viewer.ui.pages.about_page import AboutPage
@@ -35,29 +37,29 @@ _tr = tr
 
 
 class MainWindow(FluentWindow):
-    def __init__(self) -> None:
+    def __init__(self, context: AppContext) -> None:
         super().__init__()
-        self.config_store = ConfigStore()
-        self.runtime_settings = RuntimeSettingsService(self.config_store)
+        self.context = context
+        self.runtime_settings = context.runtime_settings
         self._shutting_down = False
-        self.key_query_state = QueryState("key-info")
-        self.credits_query_state = QueryState("credits")
+        self.key_query_state = context.key_query_state
+        self.credits_query_state = context.credits_query_state
         self.key_info_page = KeyInfoPage(
-            self.config_store,
+            context.key_secret_coordinator,
             self.key_query_state,
             self.refresh_cache_views,
             self.handle_query_success,
             self,
         )
         self.credits_page = CreditsPage(
-            self.config_store,
+            context.credits_secret_coordinator,
             self.credits_query_state,
             self.refresh_cache_views,
             self.handle_query_success,
             self,
         )
         self.cache_page = CachePage(
-            self.config_store,
+            context.settings_coordinator,
             self.refresh_runtime_settings,
             self.refresh_cache_views,
             self.apply_language,
@@ -67,12 +69,10 @@ class MainWindow(FluentWindow):
             False,
             self,
         )
-        self.about_page = AboutPage(self)
+        self.about_page = AboutPage(context.about_coordinator, self)
         self.shell_controller = WindowShellController(
             self,
-            config_store=self.config_store,
-            key_query_state=self.key_query_state,
-            credits_query_state=self.credits_query_state,
+            shell_coordinator=context.shell_coordinator,
             refresh_floating_metrics=self.refresh_floating_metrics,
             quit_application=self.quit_application,
         )
@@ -207,11 +207,10 @@ class MainWindow(FluentWindow):
 def main() -> int:
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
-    config_store = ConfigStore()
-    config = RuntimeSettingsService(config_store).current_config()
-    single_instance_manager: SingleInstanceManager | None = None
+    config = load_startup_config()
+    single_instance_manager = None
     if config.single_instance_enabled:
-        single_instance_manager = SingleInstanceManager(parent=app)
+        single_instance_manager = create_single_instance_manager(parent=app)
         if not single_instance_manager.start_or_activate_existing():
             return 0
     install_language(app, config.ui_language)
@@ -220,7 +219,7 @@ def main() -> int:
     app.setApplicationVersion(__version__)
     setThemeColor("#0F6CBD")
 
-    window = MainWindow()
+    window = MainWindow(create_app_context())
     if single_instance_manager is not None:
         single_instance_manager.activation_requested.connect(window.present_window)
     window.show()

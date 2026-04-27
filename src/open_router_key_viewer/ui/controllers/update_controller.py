@@ -18,7 +18,6 @@ from open_router_key_viewer.core.update_runtime import build_update_runtime_cont
 from open_router_key_viewer.core.update_state import UpdateStateMachine, UpdateStatus
 from open_router_key_viewer.core.threading import stop_thread
 from open_router_key_viewer.i18n import tr
-from open_router_key_viewer.services.update_checker import UpdateInstallError
 from open_router_key_viewer.state import (
     TextSpec,
     UpdateCardViewModel,
@@ -141,7 +140,7 @@ class AboutUpdateController:
                 )
             )
             self._update_coordinator.install_update(replacement.asset)
-        except UpdateInstallError as exc:
+        except RuntimeError as exc:
             self._handle_update_failure(str(exc))
 
     def stop(self) -> None:

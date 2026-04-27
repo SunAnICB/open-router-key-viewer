@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from open_router_key_viewer.state import AppConfig
+from open_router_key_viewer.core.settings_coordinator import SettingsCoordinator
+from open_router_key_viewer.services.settings_snapshot import SettingsSnapshotService
 from open_router_key_viewer.ui.pages.settings_page import CachePage
 
 
@@ -57,7 +59,7 @@ def test_cache_page_display_backend_change_uses_runtime_refresh(qapp) -> None:
     runtime_refreshes: list[str] = []
     global_refreshes: list[str] = []
     page = CachePage(
-        _FakeConfigStore(),
+        SettingsCoordinator(SettingsSnapshotService(_FakeConfigStore())),
         lambda: runtime_refreshes.append("runtime"),
         lambda: global_refreshes.append("global"),
         lambda _code: None,
@@ -79,7 +81,7 @@ def test_cache_page_display_backend_change_uses_runtime_refresh(qapp) -> None:
 def test_cache_page_syncs_runtime_capabilities_after_build(qapp) -> None:
     _ = qapp
     page = CachePage(
-        _FakeConfigStore(),
+        SettingsCoordinator(SettingsSnapshotService(_FakeConfigStore())),
         lambda: None,
         lambda: None,
         lambda _code: None,

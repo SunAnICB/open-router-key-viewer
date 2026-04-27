@@ -10,7 +10,6 @@ from open_router_key_viewer.services.update_checker import (
     BinaryUpdater,
     ReleaseAsset,
     UpdateCheckResult,
-    UpdateInstallError,
 )
 from open_router_key_viewer.core.update_workers import (
     UpdateCheckWorker,
@@ -74,7 +73,7 @@ class UpdateCoordinator:
 
     def install_update(self, asset: ReleaseAsset) -> None:
         if self.binary_updater is None:
-            raise UpdateInstallError("当前运行方式不支持直接替换二进制文件")
+            raise RuntimeError("当前运行方式不支持直接替换二进制文件")
         self._install_worker = self.install_worker_cls(
             self.binary_updater,
             asset,

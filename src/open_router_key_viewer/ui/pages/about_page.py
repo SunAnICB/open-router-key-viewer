@@ -16,8 +16,7 @@ with redirect_stdout(io.StringIO()):
     )
 
 from open_router_key_viewer.i18n import tr
-from open_router_key_viewer.services.about_info import build_about_view_model
-from open_router_key_viewer.services.build_info import get_build_info
+from open_router_key_viewer.core.about_coordinator import AboutCoordinator
 from open_router_key_viewer.state.about_view_model import AboutViewModel
 from open_router_key_viewer.state.app_metadata import APP_DISPLAY_NAME
 from open_router_key_viewer.ui.controllers.install_controller import AboutInstallController
@@ -28,10 +27,10 @@ _tr = tr
 
 
 class AboutPage(QWidget):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, about_coordinator: AboutCoordinator, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("about-page")
-        self._build_info = get_build_info()
+        self._about_coordinator = about_coordinator
         self._build_ui()
         self.install_controller = AboutInstallController(self, self.install_card, self._refresh_install_info)
         parent_quit = getattr(parent, "quit_application", None)
@@ -113,10 +112,10 @@ class AboutPage(QWidget):
     def _build_about_view_model(self) -> AboutViewModel:
         build_info = getattr(self, "update_controller", None)
         install_controller = getattr(self, "install_controller", None)
-        active_build = build_info.build_info if build_info is not None else self._build_info
         binary_update_supported = build_info.binary_update_supported if build_info is not None else False
-        return build_about_view_model(
-            build_info=active_build,
+        if build_info is not None:
+            self._about_coordinator.build_info = build_info.build_info
+        return self._about_coordinator.build_view_model(
             install_info=install_controller.install_info,
             binary_update_supported=binary_update_supported,
         )

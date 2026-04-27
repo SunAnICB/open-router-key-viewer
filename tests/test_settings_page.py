@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from open_router_key_viewer.state import AppConfig
 from open_router_key_viewer.ui.pages.settings_page import CachePage
 
 
@@ -12,9 +13,16 @@ class _FakeConfigStore:
     def load(self) -> dict[str, Any] | None:
         return dict(self.payload)
 
+    def load_config(self) -> AppConfig:
+        return AppConfig.from_raw(self.payload)
+
     def save_value(self, key: str, value: Any) -> dict[str, Any]:
         self.payload[key] = value
         return dict(self.payload)
+
+    def save_config_value(self, key: str, value: Any) -> AppConfig:
+        self.save_value(str(key), value)
+        return self.load_config()
 
     def save_flag(self, key: str, value: bool) -> dict[str, Any]:
         return self.save_value(key, value)

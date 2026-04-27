@@ -26,15 +26,16 @@ with redirect_stdout(io.StringIO()):
         TitleLabel,
     )
 
-from open_router_key_viewer.i18n import LANGUAGE_OPTIONS, resolve_language_code, tr
+from open_router_key_viewer.i18n import LANGUAGE_OPTIONS, tr
 from open_router_key_viewer.services.config_store import ConfigStore, ConfigStoreError
+from open_router_key_viewer.state import ConfigKey, config_display_rows
 from open_router_key_viewer.ui.pages.settings_widgets import (
     AutoQuerySettingRow,
     InputSettingRow,
     PropertyRowsPanel,
     SwitchSettingRow,
 )
-from open_router_key_viewer.ui.runtime import THEME_MODE_OPTIONS, DISPLAY_BACKEND_OPTIONS, resolve_theme_mode, show_error_bar
+from open_router_key_viewer.ui.runtime import THEME_MODE_OPTIONS, DISPLAY_BACKEND_OPTIONS, show_error_bar
 from open_router_key_viewer.ui.widgets import MetricCard, PathActionCard, WarningCard
 
 _tr = tr
@@ -213,7 +214,7 @@ class CachePage(QWidget):
         text_layout.addWidget(self.indicator_hint_label)
         layout.addLayout(text_layout, 1)
 
-        self.indicator_switch_row = self._create_switch_row(_tr("启用顶栏指示器"), "panel_indicator_enabled", card)
+        self.indicator_switch_row = self._create_switch_row(_tr("启用顶栏指示器"), ConfigKey.PANEL_INDICATOR_ENABLED, card)
         self.indicator_switch_row.setEnabled(self.indicator_available)
         layout.addWidget(self.indicator_switch_row)
         return card
@@ -240,8 +241,8 @@ class CachePage(QWidget):
         switches = QVBoxLayout()
         switches.setContentsMargins(0, 0, 0, 0)
         switches.setSpacing(8)
-        self.single_instance_row = self._create_switch_row(_tr("启用单实例模式"), "single_instance_enabled", card)
-        self.background_resident_row = self._create_switch_row(_tr("关闭窗口时驻留后台"), "background_resident_on_close", card)
+        self.single_instance_row = self._create_switch_row(_tr("启用单实例模式"), ConfigKey.SINGLE_INSTANCE_ENABLED, card)
+        self.background_resident_row = self._create_switch_row(_tr("关闭窗口时驻留后台"), ConfigKey.BACKGROUND_RESIDENT_ON_CLOSE, card)
         switches.addWidget(self.single_instance_row)
         switches.addWidget(self.background_resident_row)
         layout.addLayout(switches)
@@ -259,17 +260,17 @@ class CachePage(QWidget):
 
         self.auto_key_row = self._create_auto_query_row(
             _tr("Key 配额"),
-            "auto_query_key_info",
-            "poll_key_info_enabled",
-            "poll_key_info_interval_seconds",
+            ConfigKey.AUTO_QUERY_KEY_INFO,
+            ConfigKey.POLL_KEY_INFO_ENABLED,
+            ConfigKey.POLL_KEY_INFO_INTERVAL_SECONDS,
             "300",
             card,
         )
         self.auto_credits_row = self._create_auto_query_row(
             _tr("账户余额"),
-            "auto_query_credits",
-            "poll_credits_enabled",
-            "poll_credits_interval_seconds",
+            ConfigKey.AUTO_QUERY_CREDITS,
+            ConfigKey.POLL_CREDITS_ENABLED,
+            ConfigKey.POLL_CREDITS_INTERVAL_SECONDS,
             "300",
             card,
         )
@@ -285,18 +286,18 @@ class CachePage(QWidget):
         self.alerts_title_label = StrongBodyLabel(_tr("告警与通知"), card)
         layout.addWidget(self.alerts_title_label)
 
-        self.notify_in_app_row = self._create_switch_row(_tr("启用应用内通知"), "notify_in_app", card)
-        self.notify_system_row = self._create_switch_row(_tr("启用系统通知"), "notify_system", card)
-        self.key_warning_row = self._create_input_row(_tr("Key 配额 Warning 阈值"), "key_info_warning_threshold", "5.0", card)
-        self.key_critical_row = self._create_input_row(_tr("Key 配额 Critical 阈值"), "key_info_critical_threshold", "1.0", card)
-        self.credits_warning_row = self._create_input_row(_tr("账户余额 Warning 阈值"), "credits_warning_threshold", "10.0", card)
-        self.credits_critical_row = self._create_input_row(_tr("账户余额 Critical 阈值"), "credits_critical_threshold", "2.0", card)
-        self.webhook_key_switch_row = self._create_switch_row(_tr("启用 Key 配额 Webhook"), "notify_webhook_key_info_enabled", card)
-        self.webhook_key_only_critical_row = self._create_switch_row(_tr("Key 配额仅 Critical Webhook"), "notify_webhook_key_info_only_critical", card)
-        self.webhook_key_url_row = self._create_input_row(_tr("Key 配额 Webhook URL"), "notify_webhook_key_info_url", "https://example.com/key", card)
-        self.webhook_credits_switch_row = self._create_switch_row(_tr("启用账户余额 Webhook"), "notify_webhook_credits_enabled", card)
-        self.webhook_credits_only_critical_row = self._create_switch_row(_tr("账户余额仅 Critical Webhook"), "notify_webhook_credits_only_critical", card)
-        self.webhook_credits_url_row = self._create_input_row(_tr("账户余额 Webhook URL"), "notify_webhook_credits_url", "https://example.com/credits", card)
+        self.notify_in_app_row = self._create_switch_row(_tr("启用应用内通知"), ConfigKey.NOTIFY_IN_APP, card)
+        self.notify_system_row = self._create_switch_row(_tr("启用系统通知"), ConfigKey.NOTIFY_SYSTEM, card)
+        self.key_warning_row = self._create_input_row(_tr("Key 配额 Warning 阈值"), ConfigKey.KEY_INFO_WARNING_THRESHOLD, "5.0", card)
+        self.key_critical_row = self._create_input_row(_tr("Key 配额 Critical 阈值"), ConfigKey.KEY_INFO_CRITICAL_THRESHOLD, "1.0", card)
+        self.credits_warning_row = self._create_input_row(_tr("账户余额 Warning 阈值"), ConfigKey.CREDITS_WARNING_THRESHOLD, "10.0", card)
+        self.credits_critical_row = self._create_input_row(_tr("账户余额 Critical 阈值"), ConfigKey.CREDITS_CRITICAL_THRESHOLD, "2.0", card)
+        self.webhook_key_switch_row = self._create_switch_row(_tr("启用 Key 配额 Webhook"), ConfigKey.NOTIFY_WEBHOOK_KEY_INFO_ENABLED, card)
+        self.webhook_key_only_critical_row = self._create_switch_row(_tr("Key 配额仅 Critical Webhook"), ConfigKey.NOTIFY_WEBHOOK_KEY_INFO_ONLY_CRITICAL, card)
+        self.webhook_key_url_row = self._create_input_row(_tr("Key 配额 Webhook URL"), ConfigKey.NOTIFY_WEBHOOK_KEY_INFO_URL, "https://example.com/key", card)
+        self.webhook_credits_switch_row = self._create_switch_row(_tr("启用账户余额 Webhook"), ConfigKey.NOTIFY_WEBHOOK_CREDITS_ENABLED, card)
+        self.webhook_credits_only_critical_row = self._create_switch_row(_tr("账户余额仅 Critical Webhook"), ConfigKey.NOTIFY_WEBHOOK_CREDITS_ONLY_CRITICAL, card)
+        self.webhook_credits_url_row = self._create_input_row(_tr("账户余额 Webhook URL"), ConfigKey.NOTIFY_WEBHOOK_CREDITS_URL, "https://example.com/credits", card)
 
         for widget in (
             self.notify_in_app_row,
@@ -325,7 +326,7 @@ class CachePage(QWidget):
         self.update_hint_label = CaptionLabel(_tr("控制软件启动时是否自动检查 GitHub Release 更新。"), card)
         self.update_hint_label.setWordWrap(True)
         layout.addWidget(self.update_hint_label)
-        self.auto_update_row = self._create_switch_row(_tr("启动时自动检查更新"), "auto_check_updates", card)
+        self.auto_update_row = self._create_switch_row(_tr("启动时自动检查更新"), ConfigKey.AUTO_CHECK_UPDATES, card)
         layout.addWidget(self.auto_update_row)
         return card
 
@@ -449,11 +450,9 @@ class CachePage(QWidget):
 
     def refresh_view(self) -> None:
         snapshot = self.config_store.inspect()
-        loaded_config = snapshot.get("loaded_config")
-        payload = loaded_config if isinstance(loaded_config, dict) else {}
-        language_code = resolve_language_code(payload.get("ui_language"))
-        display_backend = self._resolve_display_backend(payload.get("display_backend"))
-        theme_mode = resolve_theme_mode(payload.get("theme_mode"))
+        raw_config = snapshot.get("loaded_config")
+        payload = raw_config if isinstance(raw_config, dict) else {}
+        config = self.config_store.load_config()
         files = snapshot.get("files", [])
         file_count = sum(1 for item in files if item.get("type") == "file")
         entry_count = len(payload)
@@ -474,41 +473,41 @@ class CachePage(QWidget):
         self.file_count_card.set_value(str(file_count), _tr("缓存目录内的文件数量"))
 
         self.status_label.setText(_tr("已解析本地缓存") if snapshot["config_exists"] else _tr("未找到配置文件"))
-        self._sync_display_backend_combo(display_backend)
-        self._sync_language_combo(language_code)
-        self._sync_theme_mode_combo(theme_mode)
+        self._sync_display_backend_combo(config.display_backend)
+        self._sync_language_combo(config.ui_language)
+        self._sync_theme_mode_combo(config.theme_mode)
         self.auto_key_row.sync_state(
-            bool(payload.get("auto_query_key_info", False)),
-            bool(payload.get("poll_key_info_enabled", False)),
-            payload.get("poll_key_info_interval_seconds", 300),
+            config.auto_query_key_info,
+            config.poll_key_info_enabled,
+            config.poll_key_info_interval_seconds,
         )
         self.auto_credits_row.sync_state(
-            bool(payload.get("auto_query_credits", False)),
-            bool(payload.get("poll_credits_enabled", False)),
-            payload.get("poll_credits_interval_seconds", 300),
+            config.auto_query_credits,
+            config.poll_credits_enabled,
+            config.poll_credits_interval_seconds,
         )
         for row, value in (
-            (self.auto_update_row, bool(payload.get("auto_check_updates", True))),
-            (self.single_instance_row, bool(payload.get("single_instance_enabled", False))),
-            (self.background_resident_row, bool(payload.get("background_resident_on_close", False))),
-            (self.indicator_switch_row, bool(payload.get("panel_indicator_enabled", False))),
-            (self.notify_in_app_row, bool(payload.get("notify_in_app", True))),
-            (self.notify_system_row, bool(payload.get("notify_system", True))),
-            (self.webhook_key_switch_row, bool(payload.get("notify_webhook_key_info_enabled", False))),
-            (self.webhook_key_only_critical_row, bool(payload.get("notify_webhook_key_info_only_critical", True))),
-            (self.webhook_credits_switch_row, bool(payload.get("notify_webhook_credits_enabled", False))),
-            (self.webhook_credits_only_critical_row, bool(payload.get("notify_webhook_credits_only_critical", True))),
+            (self.auto_update_row, config.auto_check_updates),
+            (self.single_instance_row, config.single_instance_enabled),
+            (self.background_resident_row, config.background_resident_on_close),
+            (self.indicator_switch_row, config.panel_indicator_enabled),
+            (self.notify_in_app_row, config.notify_in_app),
+            (self.notify_system_row, config.notify_system),
+            (self.webhook_key_switch_row, config.notify_webhook_key_info_enabled),
+            (self.webhook_key_only_critical_row, config.notify_webhook_key_info_only_critical),
+            (self.webhook_credits_switch_row, config.notify_webhook_credits_enabled),
+            (self.webhook_credits_only_critical_row, config.notify_webhook_credits_only_critical),
         ):
             row.sync_state(value)
-        self._sync_runtime_option_state(bool(payload.get("single_instance_enabled", False)))
+        self._sync_runtime_option_state(config.single_instance_enabled)
 
         for row, value in (
-            (self.key_warning_row, payload.get("key_info_warning_threshold", 5.0)),
-            (self.key_critical_row, payload.get("key_info_critical_threshold", 1.0)),
-            (self.credits_warning_row, payload.get("credits_warning_threshold", 10.0)),
-            (self.credits_critical_row, payload.get("credits_critical_threshold", 2.0)),
-            (self.webhook_key_url_row, payload.get("notify_webhook_key_info_url", "")),
-            (self.webhook_credits_url_row, payload.get("notify_webhook_credits_url", "")),
+            (self.key_warning_row, config.key_info_warning_threshold),
+            (self.key_critical_row, config.key_info_critical_threshold),
+            (self.credits_warning_row, config.credits_warning_threshold),
+            (self.credits_critical_row, config.credits_critical_threshold),
+            (self.webhook_key_url_row, config.notify_webhook_key_info_url),
+            (self.webhook_credits_url_row, config.notify_webhook_credits_url),
         ):
             row.sync_value(value)
 
@@ -516,11 +515,6 @@ class CachePage(QWidget):
         self._file_text = self.config_store.read_raw_config() or _tr("未找到 config.json 文件")
         self.content_output.setPlainText(self._file_text)
         self._show_mode(self._mode)
-
-    def _resolve_display_backend(self, value: object) -> str:
-        if isinstance(value, str) and value in {code for code, _ in DISPLAY_BACKEND_OPTIONS}:
-            return value
-        return "auto"
 
     def _sync_display_backend_combo(self, backend: str) -> None:
         index = self.display_backend_combo.findData(backend)
@@ -543,14 +537,14 @@ class CachePage(QWidget):
         backend = self.display_backend_combo.currentData()
         if not isinstance(backend, str):
             return
-        current_backend = self._resolve_display_backend((self.config_store.load() or {}).get("display_backend"))
+        current_backend = self.config_store.load_config().display_backend
         if backend == current_backend:
             return
         try:
             if backend == "auto":
-                self.config_store.delete_value("display_backend")
+                self.config_store.delete_value(ConfigKey.DISPLAY_BACKEND)
             else:
-                self.config_store.save_value("display_backend", backend)
+                self.config_store.save_config_value(ConfigKey.DISPLAY_BACKEND, backend)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -579,11 +573,11 @@ class CachePage(QWidget):
         language_code = self.language_combo.currentData()
         if not isinstance(language_code, str):
             return
-        current_language = resolve_language_code((self.config_store.load() or {}).get("ui_language"))
+        current_language = self.config_store.load_config().ui_language
         if language_code == current_language:
             return
         try:
-            self.config_store.save_value("ui_language", language_code)
+            self.config_store.save_config_value(ConfigKey.UI_LANGUAGE, language_code)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -602,14 +596,14 @@ class CachePage(QWidget):
         theme_mode = self.theme_mode_combo.currentData()
         if not isinstance(theme_mode, str):
             return
-        current_theme_mode = resolve_theme_mode((self.config_store.load() or {}).get("theme_mode"))
+        current_theme_mode = self.config_store.load_config().theme_mode
         if theme_mode == current_theme_mode:
             return
         try:
             if theme_mode == "auto":
-                self.config_store.delete_value("theme_mode")
+                self.config_store.delete_value(ConfigKey.THEME_MODE)
             else:
-                self.config_store.save_value("theme_mode", theme_mode)
+                self.config_store.save_config_value(ConfigKey.THEME_MODE, theme_mode)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -622,61 +616,14 @@ class CachePage(QWidget):
         self.content_output.setVisible(not showing_data)
         self.content_mode_switch.setCurrentItem(mode)
 
-    def _display_config_key(self, key: str) -> str:
-        mapping = {
-            "api_key": "OpenRouter API Key",
-            "management_key": "OpenRouter Management Key",
-            "display_backend": "显示后端",
-            "ui_language": "界面语言",
-            "theme_mode": "主题模式",
-            "single_instance_enabled": "启用单实例模式",
-            "background_resident_on_close": "关闭窗口时驻留后台",
-            "auto_check_updates": "启动时自动检查更新",
-            "auto_query_key_info": "启动时自动查询 Key 配额",
-            "auto_query_credits": "启动时自动查询账户余额",
-            "poll_key_info_enabled": "启用 Key 配额定时查询",
-            "poll_key_info_interval_seconds": "Key 配额间隔（秒）",
-            "poll_credits_enabled": "启用账户余额定时查询",
-            "poll_credits_interval_seconds": "账户余额间隔（秒）",
-            "panel_indicator_enabled": "启用顶栏指示器",
-            "notify_in_app": "启用应用内通知",
-            "notify_system": "启用系统通知",
-            "key_info_warning_threshold": "Key 配额 Warning 阈值",
-            "key_info_critical_threshold": "Key 配额 Critical 阈值",
-            "credits_warning_threshold": "账户余额 Warning 阈值",
-            "credits_critical_threshold": "账户余额 Critical 阈值",
-            "notify_webhook_key_info_enabled": "启用 Key 配额 Webhook",
-            "notify_webhook_key_info_only_critical": "Key 配额仅 Critical Webhook",
-            "notify_webhook_key_info_url": "Key 配额 Webhook URL",
-            "notify_webhook_credits_enabled": "启用账户余额 Webhook",
-            "notify_webhook_credits_only_critical": "账户余额仅 Critical Webhook",
-            "notify_webhook_credits_url": "账户余额 Webhook URL",
-        }
-        return _tr(mapping.get(key, key))
-
     def _render_parsed_data(self, loaded_config: object) -> None:
         if not isinstance(loaded_config, dict) or not loaded_config:
             rows = [(_tr("状态"), _tr("暂无数据"), "")]
         else:
-            rows = [
-                (self._display_config_key(key), self._display_config_value(key, value), "")
-                for key, value in loaded_config.items()
-            ]
+            rows = [(_tr(label), _tr(value), note) for label, value, note in config_display_rows(loaded_config)]
         self.parsed_rows.set_rows(rows)
 
-    def _display_config_value(self, key: str, value: object) -> str:
-        if key == "ui_language" and isinstance(value, str):
-            label_map = {code: label for code, label in LANGUAGE_OPTIONS}
-            return label_map.get(value, value)
-        if key == "theme_mode" and isinstance(value, str):
-            label_map = {code: _tr(label) for code, label in THEME_MODE_OPTIONS}
-            return label_map.get(value, value)
-        if key == "display_backend" and isinstance(value, str):
-            label_map = {code: _tr(label) for code, label in DISPLAY_BACKEND_OPTIONS}
-            return label_map.get(value, value)
-        return str(value)
-
-    def _create_switch_row(self, text: str, config_key: str, parent: QWidget) -> SwitchSettingRow:
+    def _create_switch_row(self, text: str, config_key: ConfigKey, parent: QWidget) -> SwitchSettingRow:
         return SwitchSettingRow(
             text,
             lambda checked, key=config_key: self._toggle_switch_value(key, checked),
@@ -686,9 +633,9 @@ class CachePage(QWidget):
     def _create_auto_query_row(
         self,
         title: str,
-        auto_query_key: str,
-        poll_key: str,
-        interval_key: str,
+        auto_query_key: ConfigKey,
+        poll_key: ConfigKey,
+        interval_key: ConfigKey,
         placeholder: str,
         parent: QWidget,
     ) -> AutoQuerySettingRow:
@@ -701,7 +648,7 @@ class CachePage(QWidget):
             parent,
         )
 
-    def _create_input_row(self, text: str, config_key: str, placeholder: str, parent: QWidget) -> InputSettingRow:
+    def _create_input_row(self, text: str, config_key: ConfigKey, placeholder: str, parent: QWidget) -> InputSettingRow:
         return InputSettingRow(
             text,
             placeholder,
@@ -709,13 +656,13 @@ class CachePage(QWidget):
             parent,
         )
 
-    def _toggle_switch_value(self, config_key: str, checked: bool) -> None:
+    def _toggle_switch_value(self, config_key: ConfigKey, checked: bool) -> None:
         try:
-            self.config_store.save_flag(config_key, checked)
+            self.config_store.save_config_value(config_key, checked)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
-        if config_key == "single_instance_enabled":
+        if config_key == ConfigKey.SINGLE_INSTANCE_ENABLED:
             self._sync_runtime_option_state(checked)
         self.refresh_view()
         self.on_runtime_settings_changed()
@@ -724,25 +671,30 @@ class CachePage(QWidget):
         self.background_resident_row.setEnabled(single_instance_enabled)
         self.background_resident_row.setToolTip("" if single_instance_enabled else _tr("需先启用单实例模式"))
 
-    def _save_input_value(self, config_key: str, raw_value: str) -> None:
+    def _save_input_value(self, config_key: ConfigKey, raw_value: str) -> None:
         try:
             if not raw_value:
                 self.config_store.delete_value(config_key)
             else:
                 value: object = raw_value
-                if config_key.endswith("_interval_seconds"):
+                if config_key in {ConfigKey.POLL_KEY_INFO_INTERVAL_SECONDS, ConfigKey.POLL_CREDITS_INTERVAL_SECONDS}:
                     try:
                         value = max(1, int(raw_value))
                     except ValueError:
                         self._show_error(_tr("间隔必须是整数秒"))
                         return
-                elif config_key.endswith("_threshold"):
+                elif config_key in {
+                    ConfigKey.KEY_INFO_WARNING_THRESHOLD,
+                    ConfigKey.KEY_INFO_CRITICAL_THRESHOLD,
+                    ConfigKey.CREDITS_WARNING_THRESHOLD,
+                    ConfigKey.CREDITS_CRITICAL_THRESHOLD,
+                }:
                     try:
                         value = float(raw_value)
                     except ValueError:
                         self._show_error(_tr("阈值必须是数字"))
                         return
-                self.config_store.save_value(config_key, value)
+                self.config_store.save_config_value(config_key, value)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return

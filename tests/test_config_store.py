@@ -19,6 +19,17 @@ def test_save_and_load_value(monkeypatch, tmp_path: Path) -> None:
     assert store.config_path.exists()
 
 
+def test_load_config_returns_typed_defaults(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    store = ConfigStore()
+    store.save_value("poll_key_info_interval_seconds", "120")
+
+    config = store.load_config()
+
+    assert config.poll_key_info_interval_seconds == 120
+    assert config.auto_check_updates is True
+
+
 def test_delete_last_value_removes_file(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     store = ConfigStore()

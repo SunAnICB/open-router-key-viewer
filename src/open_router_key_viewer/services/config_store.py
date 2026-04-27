@@ -7,6 +7,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from open_router_key_viewer.state import AppConfig, ConfigKey
+
 
 class ConfigStoreError(Exception):
     """Raised when config file operations fail."""
@@ -31,24 +33,31 @@ class ConfigStore:
             return None
         return payload
 
-    def save_value(self, key: str, value: Any) -> dict[str, Any]:
+    def load_config(self) -> AppConfig:
+        return AppConfig.from_raw(self.load())
+
+    def save_value(self, key: ConfigKey | str, value: Any) -> dict[str, Any]:
         payload = self.load() or {}
-        payload[key] = value
+        payload[str(key)] = value
         try:
             self._write(payload)
         except OSError as exc:
             raise ConfigStoreError(f"保存配置失败：{exc}") from exc
         return payload
 
-    def save_flag(self, key: str, value: bool) -> dict[str, Any]:
+    def save_config_value(self, key: ConfigKey | str, value: Any) -> AppConfig:
+        return AppConfig.from_raw(self.save_value(str(key), value))
+
+    def save_flag(self, key: ConfigKey | str, value: bool) -> dict[str, Any]:
         return self.save_value(key, value)
 
-    def delete_value(self, key: str) -> None:
+    def delete_value(self, key: ConfigKey | str) -> None:
         payload = self.load()
-        if not payload or key not in payload:
+        key_name = str(key)
+        if not payload or key_name not in payload:
             return
 
-        del payload[key]
+        del payload[key_name]
         try:
             if payload:
                 self._write(payload)

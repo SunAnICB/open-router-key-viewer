@@ -20,11 +20,11 @@ with redirect_stdout(io.StringIO()):
 
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.config_store import ConfigStore, ConfigStoreError
+from open_router_key_viewer.state import QueryState, build_query_result_view_model
 from open_router_key_viewer.ui.controllers.query_controller import QueryExecutionController
 from open_router_key_viewer.ui.pages.query_widgets import QueryResultCard, SecretInputCard
 from open_router_key_viewer.ui.runtime import (
     DISPLAY_DATETIME_FORMAT,
-    format_currency_value,
     show_error_bar,
 )
 
@@ -45,19 +45,16 @@ class BaseQueryPage(QWidget):
     def __init__(
         self,
         config_store: ConfigStore,
+        query_state: QueryState,
         on_cache_changed: Callable[[], None],
         on_query_success: Callable[[str, dict[str, object]], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.config_store = config_store
+        self.query_state = query_state
         self.on_cache_changed = on_cache_changed
         self.on_query_success = on_query_success
-        self._summary_payload: dict[str, object] = {}
-        self._http_meta: dict[str, object] = {}
-        self._raw_payload: dict[str, object] = {}
-        self._last_success_time = "-"
-        self._status_message = _tr("等待查询")
         self.query_controller = QueryExecutionController(
             self.mode,
             self,
@@ -132,7 +129,7 @@ class BaseQueryPage(QWidget):
         self._render_summary_placeholder()
 
     def _set_busy(self, busy: bool, message: str) -> None:
-        self._status_message = message
+        _ = message
         self.input_card.set_busy(busy)
         self.result_card.set_busy(busy)
 
@@ -150,7 +147,7 @@ class BaseQueryPage(QWidget):
             return
 
         try:
-            self.config_store.save_value(self.config_key, secret)
+            self.config_store.save_config_value(self.config_key, secret)
         except ConfigStoreError as exc:
             self._show_error(str(exc))
             return
@@ -226,36 +223,19 @@ class BaseQueryPage(QWidget):
 
     def _handle_query_started(self) -> None:
         self._set_busy(True, _tr("查询中..."))
+        self.query_state.start()
         self.status_badge.set_status("loading", _tr("查询中"))
-        self._summary_payload = {}
-        self._http_meta = {}
-        self._raw_payload = {}
         self._render_summary_placeholder(_tr("查询中..."))
         self.result_output.setPlainText("{\n  \"loading\": true\n}")
 
     def _handle_success(self, payload: dict) -> None:
-        self._last_success_time = datetime.now().strftime(DISPLAY_DATETIME_FORMAT)
+        self.query_state.succeed(payload, datetime.now().strftime(DISPLAY_DATETIME_FORMAT))
         self._update_time_label()
         self.status_badge.set_status("success", _tr("查询成功"))
-        self._summary_payload = payload.get("summary", {})
-        self._http_meta = payload.get("http_meta", {})
-        self._raw_payload = payload.get("raw_response", {})
         self._render_summary()
         if self.on_query_success:
             self.on_query_success(self.mode, payload)
-        self.result_output.setPlainText(
-            json.dumps(
-                {
-                    "request": self._http_meta.get("request", {}),
-                    "response": {
-                        **self._http_meta.get("response", {}),
-                        "body": self._raw_payload,
-                    },
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        self._render_raw_http()
         InfoBar.success(
             title=_tr("请求成功"),
             content=_tr("OpenRouter 返回了查询结果"),
@@ -275,25 +255,11 @@ class BaseQueryPage(QWidget):
             message = str(error)
             http_meta = {}
             raw_payload = {"error": message}
+        self.query_state.fail(message, http_meta=http_meta, raw_response=raw_payload)
         self._update_time_label()
         self.status_badge.set_status("error", _tr("查询失败"))
-        self._summary_payload = {}
-        self._http_meta = http_meta if isinstance(http_meta, dict) else {}
-        self._raw_payload = raw_payload if raw_payload is not None else {"error": message}
         self._render_summary_placeholder(_tr("查询失败"))
-        self.result_output.setPlainText(
-            json.dumps(
-                {
-                    "request": self._http_meta.get("request", {}),
-                    "response": {
-                        **self._http_meta.get("response", {}),
-                        "body": self._raw_payload,
-                    },
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        self._render_raw_http()
         self._show_error(message)
 
     def _handle_finished(self) -> None:
@@ -310,39 +276,41 @@ class BaseQueryPage(QWidget):
         self.detail_card.set_rows([(_tr("说明"), _tr("暂无结果"), _tr("先输入 key，再执行查询"))])
 
     def _render_summary(self) -> None:
-        hero_title, hero_value, hero_note, rows = self.build_result_model(self._summary_payload)
-        self.hero_card.set_content(hero_title, hero_value, hero_note)
-        self.detail_card.set_rows(rows)
+        view_model = build_query_result_view_model(self.mode, self.query_state.summary)
+        self.hero_card.set_content(_tr(view_model.hero_title), view_model.hero_value, _tr(view_model.hero_note))
+        self.detail_card.set_rows([(_tr(label), value, _tr(note)) for label, value, note in view_model.rows])
+
+    def _render_raw_http(self) -> None:
+        self.result_output.setPlainText(
+            json.dumps(self.query_state.raw_http_payload(), ensure_ascii=False, indent=2)
+        )
 
     def _update_time_label(self) -> None:
-        if self._last_success_time == "-":
+        if self.query_state.last_success_time == "-":
             self.time_label.setText(_tr("最近成功: -"))
             return
-        self.time_label.setText(f"{_tr('最近成功:')} {self._last_success_time}")
+        self.time_label.setText(f"{_tr('最近成功:')} {self.query_state.last_success_time}")
 
     def retranslate_ui(self) -> None:
         self.title_label.setText(_tr(self.page_title))
         self.input_card.retranslate_ui(_tr(self.input_label), _tr(self.input_placeholder))
         self.result_card.retranslate_ui(_tr(self.button_text))
         self._update_time_label()
-        if self._summary_payload:
+        if self.query_state.summary:
             self._render_summary()
         else:
             self._render_summary_placeholder(self.status_badge.title_label.text())
-            if not self._raw_payload:
+            if not self.query_state.raw_response:
                 self.result_output.setPlainText(
                     json.dumps({"message": _tr("在上方输入 key 后开始查询")}, ensure_ascii=False, indent=2)
                 )
 
-    def build_result_model(self, payload: dict[str, object]) -> tuple[str, str, str, list[tuple[str, str, str]]]:
-        return (_tr("结果"), "-", _tr("无数据"), [(_tr("状态"), _tr("无数据"), "")])
-
     def load_cached_secret(self) -> None:
-        payload = self.config_store.load()
-        if not payload:
+        config = self.config_store.load_config()
+        cached = getattr(config, self.config_key, "")
+        if not cached:
             self.secret_input.clear()
             return
-        cached = payload.get(self.config_key)
         if isinstance(cached, str):
             self.secret_input.setText(cached)
         else:
@@ -358,12 +326,6 @@ class BaseQueryPage(QWidget):
 
     def run_query_if_possible(self) -> None:
         self.auto_query_if_possible()
-
-    def latest_success_time(self) -> str:
-        return self._last_success_time
-
-    def _display_amount(self, value: object) -> str:
-        return format_currency_value(value)
 
     def stop_worker(self) -> None:
         self.query_controller.stop()
@@ -382,68 +344,13 @@ class KeyInfoPage(BaseQueryPage):
     def __init__(
         self,
         config_store: ConfigStore,
+        query_state: QueryState,
         on_cache_changed: Callable[[], None],
         on_query_success: Callable[[str, dict[str, object]], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(config_store, on_cache_changed, on_query_success, parent)
+        super().__init__(config_store, query_state, on_cache_changed, on_query_success, parent)
         self.setObjectName("key-info-page")
-
-    def build_result_model(
-        self,
-        payload: dict[str, object],
-    ) -> tuple[str, str, str, list[tuple[str, str, str]]]:
-        rate_limit = payload.get("rate_limit")
-        requests = "-"
-        interval = ""
-        if isinstance(rate_limit, dict):
-            requests = self._display_value(rate_limit.get("requests"))
-            interval = self._display_value(rate_limit.get("interval"))
-
-        return (
-            _tr("剩余配额"),
-            self._display_amount(payload.get("limit_remaining")),
-            _tr("当前 key 还能继续使用的额度"),
-            [
-                (_tr("剩余配额"), self._display_amount(payload.get("limit_remaining")), _tr("当前 key 还能使用的额度")),
-                (_tr("已用额度"), self._display_amount(payload.get("usage")), _tr("当前 key 已累计使用")),
-                (_tr("总额度"), self._display_amount(payload.get("limit")), _tr("当前 key 的限制上限")),
-                (_tr("今日使用"), self._display_amount(payload.get("usage_daily")), _tr("当天累计使用")),
-                (_tr("本周使用"), self._display_amount(payload.get("usage_weekly")), _tr("最近一周累计使用")),
-                (_tr("本月使用"), self._display_amount(payload.get("usage_monthly")), _tr("最近一月累计使用")),
-                (_tr("标签"), self._display_value(payload.get("label")), _tr("OpenRouter 返回的 key 标签")),
-                (_tr("重置周期"), self._display_value(payload.get("limit_reset")), _tr("配额按该周期重置")),
-                (_tr("过期时间"), self._display_datetime(payload.get("expires_at")), _tr("key 的过期时间")),
-                (_tr("免费层"), self._display_bool(payload.get("is_free_tier")), _tr("是否属于 free tier")),
-                (_tr("管理 Key"), self._display_bool(payload.get("is_management_key")), _tr("当前 key 是否具备 management 能力")),
-                (_tr("Provisioning Key"), self._display_bool(payload.get("is_provisioning_key")), _tr("当前 key 是否具备 provisioning 能力")),
-                (_tr("速率限制"), requests, interval),
-            ],
-        )
-
-    def _display_value(self, value: object) -> str:
-        if value is None:
-            return "-"
-        return str(value)
-
-    def _display_bool(self, value: object) -> str:
-        if value is True:
-            return _tr("是")
-        if value is False:
-            return _tr("否")
-        return "-"
-
-    def _display_datetime(self, value: object) -> str:
-        if not isinstance(value, str) or not value.strip():
-            return "-"
-
-        normalized = value.strip().replace("Z", "+00:00")
-        try:
-            dt = datetime.fromisoformat(normalized)
-        except ValueError:
-            return value.strip()
-
-        return dt.strftime(DISPLAY_DATETIME_FORMAT)
 
 
 class CreditsPage(BaseQueryPage):
@@ -459,24 +366,10 @@ class CreditsPage(BaseQueryPage):
     def __init__(
         self,
         config_store: ConfigStore,
+        query_state: QueryState,
         on_cache_changed: Callable[[], None],
         on_query_success: Callable[[str, dict[str, object]], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(config_store, on_cache_changed, on_query_success, parent)
+        super().__init__(config_store, query_state, on_cache_changed, on_query_success, parent)
         self.setObjectName("credits-page")
-
-    def build_result_model(
-        self,
-        payload: dict[str, object],
-    ) -> tuple[str, str, str, list[tuple[str, str, str]]]:
-        return (
-            _tr("剩余余额"),
-            self._display_amount(payload.get("remaining_credits")),
-            _tr("按 total_credits - total_usage 计算"),
-            [
-                (_tr("剩余余额"), self._display_amount(payload.get("remaining_credits")), _tr("按 total_credits - total_usage 计算")),
-                (_tr("总余额"), self._display_amount(payload.get("total_credits")), _tr("账户累计 credits")),
-                (_tr("已用余额"), self._display_amount(payload.get("total_usage")), _tr("账户累计使用")),
-            ],
-        )

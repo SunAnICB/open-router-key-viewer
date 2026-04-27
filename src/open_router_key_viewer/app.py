@@ -18,9 +18,10 @@ with redirect_stdout(io.StringIO()):
     )
 
 from open_router_key_viewer import __version__
-from open_router_key_viewer.i18n import resolve_language_code, tr
+from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.config_store import ConfigStore
 from open_router_key_viewer.services.single_instance import SingleInstanceManager
+from open_router_key_viewer.state import QueryState
 from open_router_key_viewer.ui.controllers.shell_controller import WindowShellController
 from open_router_key_viewer.ui.pages.about_page import AboutPage
 from open_router_key_viewer.ui.pages.query_pages import CreditsPage, KeyInfoPage
@@ -30,30 +31,27 @@ from open_router_key_viewer.ui.runtime import APP_DISPLAY_NAME, apply_theme_mode
 _tr = tr
 
 
-def _safe_interval_seconds(value: object, default: int = 300) -> int:
-    try:
-        return max(1, int(value))
-    except (TypeError, ValueError):
-        return default
-
-
 class MainWindow(FluentWindow):
     def __init__(self) -> None:
         super().__init__()
         self.config_store = ConfigStore()
         self._shutting_down = False
+        self.key_query_state = QueryState("key-info")
+        self.credits_query_state = QueryState("credits")
         self.key_timer = QTimer(self)
         self.key_timer.timeout.connect(self.key_info_page_auto_query)
         self.credits_timer = QTimer(self)
         self.credits_timer.timeout.connect(self.credits_page_auto_query)
         self.key_info_page = KeyInfoPage(
             self.config_store,
+            self.key_query_state,
             self.refresh_cache_views,
             self.handle_query_success,
             self,
         )
         self.credits_page = CreditsPage(
             self.config_store,
+            self.credits_query_state,
             self.refresh_cache_views,
             self.handle_query_success,
             self,
@@ -73,8 +71,8 @@ class MainWindow(FluentWindow):
         self.shell_controller = WindowShellController(
             self,
             config_store=self.config_store,
-            key_info_page=self.key_info_page,
-            credits_page=self.credits_page,
+            key_query_state=self.key_query_state,
+            credits_query_state=self.credits_query_state,
             refresh_floating_metrics=self.refresh_floating_metrics,
             quit_application=self.quit_application,
         )
@@ -162,26 +160,26 @@ class MainWindow(FluentWindow):
         self.move(x, y)
 
     def _run_startup_queries(self) -> None:
-        payload = self.config_store.load() or {}
-        if payload.get("auto_check_updates", True):
+        config = self.config_store.load_config()
+        if config.auto_check_updates:
             self.about_page.check_updates_silently()
-        if payload.get("auto_query_key_info") and payload.get("api_key"):
+        if config.auto_query_key_info and config.api_key:
             self.key_info_page.auto_query_if_possible()
-        if payload.get("auto_query_credits") and payload.get("management_key"):
+        if config.auto_query_credits and config.management_key:
             self.credits_page.auto_query_if_possible()
         self._apply_polling_settings()
 
     def _apply_polling_settings(self) -> None:
-        payload = self.config_store.load() or {}
+        config = self.config_store.load_config()
         self._apply_timer(
             self.key_timer,
-            bool(payload.get("poll_key_info_enabled")) and bool(payload.get("api_key")),
-            _safe_interval_seconds(payload.get("poll_key_info_interval_seconds", 300)),
+            config.poll_key_info_enabled and bool(config.api_key),
+            config.poll_key_info_interval_seconds,
         )
         self._apply_timer(
             self.credits_timer,
-            bool(payload.get("poll_credits_enabled")) and bool(payload.get("management_key")),
-            _safe_interval_seconds(payload.get("poll_credits_interval_seconds", 300)),
+            config.poll_credits_enabled and bool(config.management_key),
+            config.poll_credits_interval_seconds,
         )
 
     def _apply_timer(self, timer: QTimer, enabled: bool, interval_seconds: int) -> None:
@@ -213,12 +211,10 @@ class MainWindow(FluentWindow):
         QApplication.instance().quit()
 
     def _single_instance_enabled(self) -> bool:
-        payload = self.config_store.load() or {}
-        return bool(payload.get("single_instance_enabled", False))
+        return self.config_store.load_config().single_instance_enabled
 
     def _background_resident_on_close_enabled(self) -> bool:
-        payload = self.config_store.load() or {}
-        return bool(payload.get("background_resident_on_close", False))
+        return self.config_store.load_config().background_resident_on_close
 
     def handle_query_success(self, mode: str, payload: dict[str, object]) -> None:
         self.shell_controller.handle_query_success(mode, payload)
@@ -245,14 +241,14 @@ def main() -> int:
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
     config_store = ConfigStore()
-    payload = config_store.load() or {}
+    config = config_store.load_config()
     single_instance_manager: SingleInstanceManager | None = None
-    if payload.get("single_instance_enabled"):
+    if config.single_instance_enabled:
         single_instance_manager = SingleInstanceManager(parent=app)
         if not single_instance_manager.start_or_activate_existing():
             return 0
-    install_language(app, resolve_language_code(payload.get("ui_language")))
-    apply_theme_mode(str(payload.get("theme_mode", "auto")))
+    install_language(app, config.ui_language)
+    apply_theme_mode(config.theme_mode)
     app.setApplicationName(APP_DISPLAY_NAME)
     app.setApplicationVersion(__version__)
     setThemeColor("#0F6CBD")

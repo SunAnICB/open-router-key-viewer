@@ -19,7 +19,7 @@ with redirect_stdout(io.StringIO()):
 
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.config_store import ConfigStore
-from open_router_key_viewer.ui.pages.query_pages import BaseQueryPage
+from open_router_key_viewer.state import QueryState
 from open_router_key_viewer.ui.runtime import APP_DISPLAY_NAME, DISPLAY_DATETIME_FORMAT, format_currency_value
 from open_router_key_viewer.ui.widgets import FloatingWindow
 
@@ -39,15 +39,15 @@ class WindowShellController:
         host: QWidget,
         *,
         config_store: ConfigStore,
-        key_info_page: BaseQueryPage,
-        credits_page: BaseQueryPage,
+        key_query_state: QueryState,
+        credits_query_state: QueryState,
         refresh_floating_metrics: Callable[[], None],
         quit_application: Callable[[], None],
     ) -> None:
         self.host = host
         self.config_store = config_store
-        self.key_info_page = key_info_page
-        self.credits_page = credits_page
+        self.key_query_state = key_query_state
+        self.credits_query_state = credits_query_state
         self._refresh_floating_metrics_callback = refresh_floating_metrics
         self._quit_application_callback = quit_application
         self._floating_window_supported = self._is_x11_platform()
@@ -75,8 +75,8 @@ class WindowShellController:
         return self._indicator_available
 
     def setup_indicator(self) -> None:
-        payload = self.config_store.load() or {}
-        if self._indicator_available and bool(payload.get("panel_indicator_enabled")):
+        config = self.config_store.load_config()
+        if self._indicator_available and config.panel_indicator_enabled:
             sni = SNITray(
                 activate=self.show_full_window,
                 refresh=self._refresh_floating_metrics_callback,
@@ -91,8 +91,8 @@ class WindowShellController:
         self._setup_tray_icon()
 
     def apply_indicator_settings(self) -> None:
-        payload = self.config_store.load() or {}
-        want_enabled = self._indicator_available and bool(payload.get("panel_indicator_enabled"))
+        config = self.config_store.load_config()
+        want_enabled = self._indicator_available and config.panel_indicator_enabled
 
         if self._sni_tray is None or not self._sni_tray.is_active:
             if want_enabled:
@@ -282,10 +282,10 @@ class WindowShellController:
     def _update_floating_metrics(self, mode: str, summary: dict[str, object]) -> None:
         if mode == "key-info":
             self._floating_key_value = format_currency_value(summary.get("limit_remaining"))
-            self._floating_key_time = self.key_info_page.latest_success_time()
+            self._floating_key_time = self.key_query_state.last_success_time
         else:
             self._floating_credits_value = format_currency_value(summary.get("remaining_credits"))
-            self._floating_credits_time = self.credits_page.latest_success_time()
+            self._floating_credits_time = self.credits_query_state.last_success_time
         self._sync_floating_window()
 
     def _sync_floating_window(self) -> None:
@@ -299,18 +299,18 @@ class WindowShellController:
         self._sync_panel_label()
 
     def _evaluate_thresholds(self, mode: str, summary: dict[str, object]) -> None:
-        payload = self.config_store.load() or {}
+        config = self.config_store.load_config()
         if mode == "key-info":
             value = summary.get("limit_remaining")
-            warning = payload.get("key_info_warning_threshold")
-            critical = payload.get("key_info_critical_threshold")
+            warning = config.key_info_warning_threshold
+            critical = config.key_info_critical_threshold
             target = _tr("Key 配额")
             label = summary.get("label")
             subject = f"{target} · {label}" if isinstance(label, str) and label.strip() else target
         else:
             value = summary.get("remaining_credits")
-            warning = payload.get("credits_warning_threshold")
-            critical = payload.get("credits_critical_threshold")
+            warning = config.credits_warning_threshold
+            critical = config.credits_critical_threshold
             target = _tr("账户余额")
             subject = target
 
@@ -326,9 +326,9 @@ class WindowShellController:
             return
 
         self._alert_state[mode] = level
-        if payload.get("notify_in_app", True):
+        if config.notify_in_app:
             self._notify_in_app(level, target, subject, float(value))
-        if payload.get("notify_system", True):
+        if config.notify_system:
             self._notify_system(level, target, subject, float(value))
         self._maybe_send_webhook(mode, level, float(value))
 
@@ -434,16 +434,16 @@ class WindowShellController:
         return QIcon()
 
     def _maybe_send_webhook(self, mode: str, level: str, value: float) -> None:
-        payload = self.config_store.load() or {}
+        config = self.config_store.load_config()
         if mode == "key-info":
-            enabled = bool(payload.get("notify_webhook_key_info_enabled"))
-            url = payload.get("notify_webhook_key_info_url")
-            only_critical = bool(payload.get("notify_webhook_key_info_only_critical", True))
+            enabled = config.notify_webhook_key_info_enabled
+            url = config.notify_webhook_key_info_url
+            only_critical = config.notify_webhook_key_info_only_critical
             target = "key_info"
         else:
-            enabled = bool(payload.get("notify_webhook_credits_enabled"))
-            url = payload.get("notify_webhook_credits_url")
-            only_critical = bool(payload.get("notify_webhook_credits_only_critical", True))
+            enabled = config.notify_webhook_credits_enabled
+            url = config.notify_webhook_credits_url
+            only_critical = config.notify_webhook_credits_only_critical
             target = "credits"
 
         if not enabled or not isinstance(url, str) or not url.strip():

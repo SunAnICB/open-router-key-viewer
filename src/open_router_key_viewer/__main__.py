@@ -12,9 +12,8 @@ def _apply_display_backend() -> None:
     if os.environ.get("QT_QPA_PLATFORM"):
         return
 
-    payload = ConfigStore().load() or {}
-    backend = payload.get("display_backend")
-    if not isinstance(backend, str) or backend not in DISPLAY_BACKEND_OPTIONS:
+    backend = ConfigStore().load_config().display_backend
+    if backend not in DISPLAY_BACKEND_OPTIONS:
         return
 
     mapping = {

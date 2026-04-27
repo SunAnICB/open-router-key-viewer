@@ -4,7 +4,7 @@ import io
 import sys
 from contextlib import redirect_stdout
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import QApplication
 
@@ -18,6 +18,7 @@ with redirect_stdout(io.StringIO()):
     )
 
 from open_router_key_viewer import __version__
+from open_router_key_viewer.core.app_kernel import AppKernel
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.config_store import ConfigStore
 from open_router_key_viewer.services.runtime_settings import RuntimeSettingsService
@@ -41,10 +42,6 @@ class MainWindow(FluentWindow):
         self._shutting_down = False
         self.key_query_state = QueryState("key-info")
         self.credits_query_state = QueryState("credits")
-        self.key_timer = QTimer(self)
-        self.key_timer.timeout.connect(self.key_info_page_auto_query)
-        self.credits_timer = QTimer(self)
-        self.credits_timer.timeout.connect(self.credits_page_auto_query)
         self.key_info_page = KeyInfoPage(
             self.config_store,
             self.key_query_state,
@@ -79,6 +76,19 @@ class MainWindow(FluentWindow):
             refresh_floating_metrics=self.refresh_floating_metrics,
             quit_application=self.quit_application,
         )
+        self.kernel = AppKernel(
+            self.runtime_settings,
+            run_key_query=self.key_info_page.auto_query_if_possible,
+            run_credits_query=self.credits_page.auto_query_if_possible,
+            load_cached_secrets=self._load_cached_secrets,
+            refresh_settings_view=self.cache_page.refresh_view,
+            apply_indicator_settings=self.shell_controller.apply_indicator_settings,
+            check_updates_silently=self.about_page.check_updates_silently,
+            hide_to_background=self.shell_controller.hide_to_background,
+            stop_workers=self._stop_workers,
+            close_shell=self.shell_controller.close,
+            parent=self,
+        )
         self.cache_page.sync_runtime_capabilities(
             floating_window_supported=self.shell_controller.floating_window_supported,
             indicator_available=self.shell_controller.indicator_available,
@@ -93,7 +103,7 @@ class MainWindow(FluentWindow):
         self._apply_initial_geometry()
         self.shell_controller.setup_indicator()
         self.shell_controller.retranslate_ui()
-        QTimer.singleShot(0, self._run_startup_queries)
+        self.kernel.schedule_startup_tasks()
 
     def apply_language(self, language_code: str) -> None:
         app = QApplication.instance()
@@ -136,14 +146,14 @@ class MainWindow(FluentWindow):
         self.shell_controller.retranslate_ui()
 
     def refresh_cache_views(self) -> None:
+        self.kernel.refresh_cache_views()
+
+    def _load_cached_secrets(self) -> None:
         self.key_info_page.load_cached_secret()
         self.credits_page.load_cached_secret()
-        self.cache_page.refresh_view()
-        self.refresh_runtime_settings()
 
     def refresh_runtime_settings(self) -> None:
-        self._apply_polling_settings()
-        self.shell_controller.apply_indicator_settings()
+        self.kernel.refresh_runtime_settings()
 
     def _apply_initial_geometry(self) -> None:
         screen = self.screen() or QGuiApplication.primaryScreen()
@@ -162,41 +172,6 @@ class MainWindow(FluentWindow):
         y = available.y() + (available.height() - height) // 2
         self.move(x, y)
 
-    def _run_startup_queries(self) -> None:
-        config = self.runtime_settings.current_config()
-        if config.auto_check_updates:
-            self.about_page.check_updates_silently()
-        if config.auto_query_key_info and config.api_key:
-            self.key_info_page.auto_query_if_possible()
-        if config.auto_query_credits and config.management_key:
-            self.credits_page.auto_query_if_possible()
-        self._apply_polling_settings()
-
-    def _apply_polling_settings(self) -> None:
-        config = self.runtime_settings.current_config()
-        self._apply_timer(
-            self.key_timer,
-            config.poll_key_info_enabled and bool(config.api_key),
-            config.poll_key_info_interval_seconds,
-        )
-        self._apply_timer(
-            self.credits_timer,
-            config.poll_credits_enabled and bool(config.management_key),
-            config.poll_credits_interval_seconds,
-        )
-
-    def _apply_timer(self, timer: QTimer, enabled: bool, interval_seconds: int) -> None:
-        if enabled:
-            timer.start(max(1, interval_seconds) * 1000)
-        else:
-            timer.stop()
-
-    def key_info_page_auto_query(self) -> None:
-        self.key_info_page.auto_query_if_possible()
-
-    def credits_page_auto_query(self) -> None:
-        self.credits_page.auto_query_if_possible()
-
     def refresh_floating_metrics(self) -> None:
         self.key_info_page.run_query_if_possible()
         self.credits_page.run_query_if_possible()
@@ -213,30 +188,19 @@ class MainWindow(FluentWindow):
         self._shutting_down = True
         QApplication.instance().quit()
 
-    def _single_instance_enabled(self) -> bool:
-        return self.runtime_settings.current_config().single_instance_enabled
-
-    def _background_resident_on_close_enabled(self) -> bool:
-        return self.runtime_settings.current_config().background_resident_on_close
-
     def handle_query_success(self, mode: str, summary: dict[str, object]) -> None:
         self.shell_controller.handle_query_success(mode, summary)
 
-    def closeEvent(self, event: QCloseEvent) -> None:
-        if (
-            not self._shutting_down
-            and self._single_instance_enabled()
-            and self._background_resident_on_close_enabled()
-        ):
-            if self.shell_controller.hide_to_background():
-                event.ignore()
-                return
-        self.key_timer.stop()
-        self.credits_timer.stop()
+    def _stop_workers(self) -> None:
         self.key_info_page.stop_worker()
         self.credits_page.stop_worker()
         self.about_page.stop_workers()
-        self.shell_controller.close()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self.kernel.should_hide_to_background(self._shutting_down):
+            event.ignore()
+            return
+        self.kernel.shutdown()
         super().closeEvent(event)
 
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
+import open_router_key_viewer.core.update_coordinator as update_coordinator_module
 import open_router_key_viewer.ui.controllers.update_controller as update_controller_module
 from open_router_key_viewer.services.update_checker import ReleaseAsset, ReleaseInfo, UpdateCheckResult
 from open_router_key_viewer.ui.controllers.update_controller import AboutUpdateController
@@ -250,10 +251,10 @@ def test_binary_updater_uses_launcher_when_running_installed_copy(monkeypatch: p
 
 def test_install_success_uses_controlled_quit_path(monkeypatch: pytest.MonkeyPatch) -> None:
     scheduled: list[tuple[int, object]] = []
-    monkeypatch.setattr(update_controller_module.QTimer, "singleShot", lambda delay, callback: scheduled.append((delay, callback)))
+    monkeypatch.setattr(update_coordinator_module.QTimer, "singleShot", lambda delay, callback: scheduled.append((delay, callback)))
     controller, card, host = _make_controller(monkeypatch, frozen=True)
 
-    controller._handle_install_success()
+    controller._update_coordinator._handle_install_succeeded()
 
     assert card.states[-1]["title"] == "更新已下载完成"
     assert scheduled and scheduled[-1][0] == 300
@@ -266,6 +267,7 @@ def test_stop_disconnects_worker_signals_before_stopping(monkeypatch: pytest.Mon
     monkeypatch.setattr(update_controller_module, "stop_thread", lambda worker: stopped.append(worker))
     controller, _, _ = _make_controller(monkeypatch, frozen=True)
     controller.check_updates()
+    update_worker = controller._update_worker
 
     class _FakeInstallWorker:
         def __init__(self) -> None:
@@ -275,10 +277,14 @@ def test_stop_disconnects_worker_signals_before_stopping(monkeypatch: pytest.Mon
             self.finished = _FakeSignal()
 
     controller._install_worker = _FakeInstallWorker()
+    install_worker = controller._install_worker
     controller.stop()
 
-    assert stopped[0] is controller._update_worker or stopped[1] is controller._update_worker
-    assert controller._install_worker.progress_changed._callbacks == []
-    assert controller._install_worker.succeeded._callbacks == []
-    assert controller._install_worker.failed._callbacks == []
-    assert controller._install_worker.finished._callbacks == []
+    assert update_worker in stopped
+    assert install_worker in stopped
+    assert install_worker.progress_changed._callbacks == []
+    assert install_worker.succeeded._callbacks == []
+    assert install_worker.failed._callbacks == []
+    assert install_worker.finished._callbacks == []
+    assert controller._update_worker is None
+    assert controller._install_worker is None

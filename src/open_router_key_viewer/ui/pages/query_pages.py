@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 from collections.abc import Callable
 from contextlib import redirect_stdout
-from datetime import datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QFrame, QVBoxLayout, QWidget
@@ -18,6 +17,7 @@ with redirect_stdout(io.StringIO()):
     )
 
 from open_router_key_viewer.i18n import tr
+from open_router_key_viewer.core.query_coordinator import QueryCoordinator
 from open_router_key_viewer.services.config_store import ConfigStore, ConfigStoreError
 from open_router_key_viewer.services.secret_cache import SecretCacheService
 from open_router_key_viewer.state import (
@@ -26,10 +26,7 @@ from open_router_key_viewer.state import (
     build_initial_raw_http_text,
     build_loading_raw_http_text,
     build_query_page_render_model,
-    normalize_query_error,
 )
-from open_router_key_viewer.state.app_metadata import DISPLAY_DATETIME_FORMAT
-from open_router_key_viewer.ui.controllers.query_controller import QueryExecutionController
 from open_router_key_viewer.ui.pages.query_widgets import QueryResultCard, SecretInputCard
 from open_router_key_viewer.ui.runtime import (
     show_error_bar,
@@ -62,12 +59,14 @@ class BaseQueryPage(QWidget):
         self.query_state = query_state
         self.on_cache_changed = on_cache_changed
         self.on_query_success = on_query_success
-        self.query_controller = QueryExecutionController(
+        self.query_coordinator = QueryCoordinator(
             self.mode,
+            self.query_state,
             self,
             on_started=self._handle_query_started,
-            on_succeeded=self._handle_success,
+            on_state_changed=self._render_query_state,
             on_failed=self._handle_failure,
+            on_succeeded=self._handle_success,
             on_finished=self._handle_finished,
         )
         self._build_ui()
@@ -220,22 +219,18 @@ class BaseQueryPage(QWidget):
 
     def _run_query(self, mode: str, secret: str) -> None:
         _ = mode
-        if self.query_controller.is_running():
+        if self.query_coordinator.is_running():
             self._show_error(_tr("已有请求正在执行，请稍候"))
             return
-        self.query_controller.run(secret)
+        self.query_coordinator.run(secret)
 
     def _handle_query_started(self) -> None:
         self._set_busy(True, _tr("查询中..."))
-        self.query_state.start()
-        self.status_badge.set_status("loading", _tr("查询中"))
         self._render_query_state(raw_http_text=build_loading_raw_http_text())
 
-    def _handle_success(self, payload: dict) -> None:
-        self.query_state.succeed(payload, datetime.now().strftime(DISPLAY_DATETIME_FORMAT))
-        self._render_query_state()
+    def _handle_success(self, summary: dict[str, object]) -> None:
         if self.on_query_success:
-            self.on_query_success(self.mode, self.query_state.summary)
+            self.on_query_success(self.mode, summary)
         InfoBar.success(
             title=_tr("请求成功"),
             content=_tr("OpenRouter 返回了查询结果"),
@@ -246,10 +241,7 @@ class BaseQueryPage(QWidget):
             parent=self.window(),
         )
 
-    def _handle_failure(self, error: object) -> None:
-        message, http_meta, raw_payload = normalize_query_error(error, _tr("请求失败"))
-        self.query_state.fail(message, http_meta=http_meta, raw_response=raw_payload)
-        self._render_query_state()
+    def _handle_failure(self, message: str) -> None:
         self._show_error(message)
 
     def _handle_finished(self) -> None:
@@ -299,7 +291,7 @@ class BaseQueryPage(QWidget):
         secret = self.secret_input.text().strip()
         if not secret:
             return
-        if self.query_controller.is_running():
+        if self.query_coordinator.is_running():
             return
         self._run_query(self.mode, secret)
 
@@ -307,7 +299,7 @@ class BaseQueryPage(QWidget):
         self.auto_query_if_possible()
 
     def stop_worker(self) -> None:
-        self.query_controller.stop()
+        self.query_coordinator.stop()
 
 
 class KeyInfoPage(BaseQueryPage):

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import os
 import sys
 from collections.abc import Callable
 from contextlib import redirect_stdout
@@ -9,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from PySide6.QtCore import QTimer, Qt, QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -17,6 +16,7 @@ with redirect_stdout(io.StringIO()):
     from qfluentwidgets import InfoBar, InfoBarPosition, MessageBox
 
 from open_router_key_viewer import __version__
+from open_router_key_viewer.core.update_coordinator import UpdateCoordinator
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.build_info import get_build_info
 from open_router_key_viewer.services.installer import AppInstaller
@@ -47,12 +47,10 @@ from open_router_key_viewer.state.app_metadata import (
     BINARY_ASSET_NAME,
     DISPLAY_DATETIME_FORMAT,
 )
+from open_router_key_viewer.core.update_workers import UpdateCheckWorker, UpdateInstallWorker
+from open_router_key_viewer.core.threading import stop_thread
 from open_router_key_viewer.ui.runtime import (
-    UpdateCheckWorker,
-    UpdateInstallWorker,
-    disconnect_signal,
     show_error_bar,
-    stop_thread,
 )
 from open_router_key_viewer.ui.widgets import UpdateCard
 
@@ -74,8 +72,6 @@ class AboutUpdateController:
         self._quit_application = quit_application or self._default_quit_application
         self._release_url = APP_REPOSITORY_URL + "/releases"
         self._latest_asset: ReleaseAsset | None = None
-        self._update_worker: UpdateCheckWorker | None = None
-        self._install_worker: UpdateInstallWorker | None = None
         self._binary_update_supported = bool(getattr(sys, "frozen", False))
         self._install_info = AppInstaller(
             Path(sys.executable),
@@ -103,6 +99,22 @@ class AboutUpdateController:
             asset_name=BINARY_ASSET_NAME,
             current_version=__version__,
         )
+        self._update_coordinator = UpdateCoordinator(
+            self.host,
+            checker=self._release_checker,
+            binary_updater=self._binary_updater,
+            on_check_succeeded=self._handle_update_success,
+            on_check_failed=self._handle_update_failure,
+            on_check_finished=self._handle_update_finished,
+            on_install_progress=self._handle_install_progress,
+            on_install_succeeded=self._handle_install_success,
+            on_install_failed=self._handle_install_failure,
+            on_install_finished=self._handle_install_finished,
+            on_install_ready_to_relaunch=self._quit_application,
+            check_worker_cls=UpdateCheckWorker,
+            install_worker_cls=UpdateInstallWorker,
+            stop_thread_func=stop_thread,
+        )
 
         self.update_card.check_button.clicked.connect(self.check_updates)
         self.update_card.release_button.clicked.connect(self.open_release_page)
@@ -116,6 +128,18 @@ class AboutUpdateController:
     @property
     def binary_update_supported(self) -> bool:
         return self._binary_update_supported
+
+    @property
+    def _update_worker(self):
+        return self._update_coordinator._check_worker
+
+    @property
+    def _install_worker(self):
+        return self._update_coordinator._install_worker
+
+    @_install_worker.setter
+    def _install_worker(self, worker) -> None:
+        self._update_coordinator._install_worker = worker
 
     def retranslate_ui(self) -> None:
         self.update_card.retranslate_ui()
@@ -169,35 +193,15 @@ class AboutUpdateController:
                 name=self._latest_asset.name,
                 meta=_tr("下载完成后将自动退出当前程序，替换二进制并重新启动。"),
             )
-            self._install_worker = UpdateInstallWorker(
-                self._binary_updater,
-                self._latest_asset,
-                os.getpid(),
-                self.host,
-            )
-            self._install_worker.progress_changed.connect(self._handle_install_progress)
-            self._install_worker.succeeded.connect(self._handle_install_success)
-            self._install_worker.failed.connect(self._handle_install_failure)
-            self._install_worker.finished.connect(self._handle_install_finished)
-            self._install_worker.start()
+            self._update_coordinator.install_update(self._latest_asset)
         except UpdateInstallError as exc:
             self._handle_update_failure(str(exc))
 
     def stop(self) -> None:
-        if self._update_worker is not None:
-            disconnect_signal(self._update_worker.succeeded)
-            disconnect_signal(self._update_worker.failed)
-            disconnect_signal(self._update_worker.finished)
-        if self._install_worker is not None:
-            disconnect_signal(self._install_worker.progress_changed)
-            disconnect_signal(self._install_worker.succeeded)
-            disconnect_signal(self._install_worker.failed)
-            disconnect_signal(self._install_worker.finished)
-        stop_thread(self._update_worker)
-        stop_thread(self._install_worker)
+        self._update_coordinator.stop()
 
     def _start_update_check(self) -> None:
-        if self._update_worker and self._update_worker.isRunning():
+        if self._update_coordinator.is_checking():
             return
 
         self.update_card.check_button.setEnabled(False)
@@ -206,11 +210,7 @@ class AboutUpdateController:
         if not self._startup_silent_check:
             self._apply_update_card_state(build_update_checking_state())
             self._refresh_update_card_state = self._start_update_check_state
-        self._update_worker = UpdateCheckWorker(self._release_checker, self.host)
-        self._update_worker.succeeded.connect(self._handle_update_success)
-        self._update_worker.failed.connect(self._handle_update_failure)
-        self._update_worker.finished.connect(self._handle_update_finished)
-        self._update_worker.start()
+        self._update_coordinator.check_updates()
 
     def _start_update_check_state(self) -> None:
         self._apply_update_card_state(build_update_checking_state())
@@ -318,10 +318,6 @@ class AboutUpdateController:
         self._refresh_update_card_state = lambda: self._show_download_failed_state(message)
 
     def _handle_update_success(self, result: object) -> None:
-        if not isinstance(result, UpdateCheckResult):
-            self._handle_update_failure(_tr("检查更新失败：返回结果不符合预期"))
-            return
-
         release = result.latest_release
         self._release_url = release.html_url
         self._latest_asset = release.asset
@@ -416,7 +412,6 @@ class AboutUpdateController:
     def _handle_update_finished(self) -> None:
         self.update_card.check_button.setEnabled(True)
         self.update_card.release_button.setEnabled(True)
-        self._update_worker = None
         self._startup_silent_check = False
 
     def _handle_install_progress(self, received: int, total: int) -> None:
@@ -436,15 +431,13 @@ class AboutUpdateController:
         )
 
     def _handle_install_success(self) -> None:
-        self._show_downloaded_state(filename=os.path.basename(sys.executable))
-        QTimer.singleShot(300, self._quit_application)
+        self._show_downloaded_state(filename=Path(sys.executable).name)
 
     def _handle_install_failure(self, message: str) -> None:
         self._show_download_failed_state(message)
         show_error_bar(self.host.window(), _tr("下载更新失败"), message)
 
     def _handle_install_finished(self) -> None:
-        self._install_worker = None
         if QApplication.instance() is None:
             return
         self.update_card.check_button.setEnabled(True)

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import io
-import sys
 from contextlib import redirect_stdout
-from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QFrame, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QVBoxLayout, QWidget
 
 with redirect_stdout(io.StringIO()):
     from qfluentwidgets import (
@@ -20,7 +18,6 @@ with redirect_stdout(io.StringIO()):
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.services.about_info import build_about_view_model
 from open_router_key_viewer.services.build_info import get_build_info
-from open_router_key_viewer.services.installer import AppInstaller
 from open_router_key_viewer.state.about_view_model import AboutViewModel
 from open_router_key_viewer.state.app_metadata import APP_DISPLAY_NAME
 from open_router_key_viewer.ui.controllers.install_controller import AboutInstallController
@@ -35,11 +32,6 @@ class AboutPage(QWidget):
         super().__init__(parent)
         self.setObjectName("about-page")
         self._build_info = get_build_info()
-        self._binary_update_supported = bool(getattr(sys, "frozen", False))
-        self._install_info = AppInstaller(
-            Path(sys.executable),
-            is_binary_runtime=bool(getattr(sys, "frozen", False)),
-        ).inspect()
         self._build_ui()
         self.install_controller = AboutInstallController(self, self.install_card, self._refresh_install_info)
         parent_quit = getattr(parent, "quit_application", None)
@@ -48,6 +40,7 @@ class AboutPage(QWidget):
             self.update_card,
             quit_application=parent_quit if callable(parent_quit) else None,
         )
+        self._refresh_about_view()
 
     def _build_ui(self) -> None:
         outer = QVBoxLayout(self)
@@ -99,7 +92,6 @@ class AboutPage(QWidget):
 
         self.notes_card = DetailCard(_tr("项目"), self)
         root.addWidget(self.notes_card)
-        self._refresh_about_view()
 
     def retranslate_ui(self) -> None:
         self._refresh_install_info()
@@ -111,10 +103,7 @@ class AboutPage(QWidget):
         self.update_controller.check_updates_silently()
 
     def _refresh_install_info(self) -> None:
-        self._install_info = AppInstaller(
-            Path(sys.executable),
-            is_binary_runtime=bool(getattr(sys, "frozen", False)),
-        ).inspect()
+        self.install_controller.refresh_install_info()
         self._refresh_about_view()
 
     def _refresh_about_view(self) -> None:
@@ -123,13 +112,12 @@ class AboutPage(QWidget):
 
     def _build_about_view_model(self) -> AboutViewModel:
         build_info = getattr(self, "update_controller", None)
+        install_controller = getattr(self, "install_controller", None)
         active_build = build_info.build_info if build_info is not None else self._build_info
-        binary_update_supported = (
-            build_info.binary_update_supported if build_info is not None else self._binary_update_supported
-        )
+        binary_update_supported = build_info.binary_update_supported if build_info is not None else False
         return build_about_view_model(
             build_info=active_build,
-            install_info=self._install_info,
+            install_info=install_controller.install_info,
             binary_update_supported=binary_update_supported,
         )
 

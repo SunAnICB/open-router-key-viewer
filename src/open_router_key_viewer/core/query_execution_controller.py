@@ -20,8 +20,8 @@ class QueryExecutionController:
         on_succeeded: Callable[[dict], None],
         on_failed: Callable[[object], None],
         on_finished: Callable[[], None],
-        worker_cls=QueryWorker,
-        stop_thread_func=stop_thread,
+        worker_cls=None,
+        stop_thread_func=None,
     ) -> None:
         self.mode = mode
         self.parent = parent
@@ -29,8 +29,8 @@ class QueryExecutionController:
         self.on_succeeded = on_succeeded
         self.on_failed = on_failed
         self.on_finished = on_finished
-        self.worker_cls = worker_cls
-        self.stop_thread_func = stop_thread_func
+        self.worker_cls = worker_cls or QueryWorker
+        self.stop_thread_func = stop_thread_func or stop_thread
         self._worker: QueryWorker | None = None
 
     def is_running(self) -> bool:

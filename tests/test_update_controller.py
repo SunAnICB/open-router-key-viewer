@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
@@ -130,13 +131,22 @@ class _FakeBinaryUpdater:
 def _make_controller(
     monkeypatch: pytest.MonkeyPatch, *, frozen: bool = False
 ) -> tuple[AboutUpdateController, _FakeUpdateCard, _FakeHost]:
-    monkeypatch.setattr(update_controller_module, "get_build_info", lambda: _FakeBuildInfo())
-    monkeypatch.setattr(update_controller_module, "GitHubReleaseChecker", _FakeReleaseChecker)
-    monkeypatch.setattr(update_controller_module, "UpdateCheckWorker", _FakeUpdateWorker)
-    monkeypatch.setattr(update_controller_module, "BinaryUpdater", _FakeBinaryUpdater)
-    monkeypatch.setattr(update_controller_module, "AppInstaller", _FakeInstaller)
+    monkeypatch.setattr(update_coordinator_module, "UpdateCheckWorker", _FakeUpdateWorker)
     monkeypatch.setattr(update_controller_module.sys, "frozen", frozen, raising=False)
     monkeypatch.setattr(update_controller_module.sys, "executable", "/tmp/open-router-key-viewer", raising=False)
+    binary_updater = _FakeBinaryUpdater() if frozen else None
+    monkeypatch.setattr(
+        update_controller_module,
+        "build_update_runtime_context",
+        lambda: SimpleNamespace(
+            build_info=_FakeBuildInfo(),
+            binary_update_supported=frozen,
+            install_info=_FakeInstallInfo(),
+            binary_updater=binary_updater,
+            release_checker=_FakeReleaseChecker(),
+            release_url="https://example.com/releases",
+        ),
+    )
     host = _FakeHost()
     card = _FakeUpdateCard()
     controller = AboutUpdateController(host, card, quit_application=host.quit_application)
@@ -233,20 +243,31 @@ def test_binary_updater_uses_launcher_when_running_installed_copy(monkeypatch: p
         def inspect(self) -> _FakeInstallInfo:
             return _FakeInstallInfo(current_is_installed=True, is_installed=True)
 
-    monkeypatch.setattr(update_controller_module, "get_build_info", lambda: _FakeBuildInfo())
-    monkeypatch.setattr(update_controller_module, "GitHubReleaseChecker", _FakeReleaseChecker)
-    monkeypatch.setattr(update_controller_module, "UpdateCheckWorker", _FakeUpdateWorker)
-    monkeypatch.setattr(update_controller_module, "BinaryUpdater", _FakeBinaryUpdater)
-    monkeypatch.setattr(update_controller_module, "AppInstaller", _InstalledFakeInstaller)
+    monkeypatch.setattr(update_coordinator_module, "UpdateCheckWorker", _FakeUpdateWorker)
     monkeypatch.setattr(update_controller_module.sys, "frozen", True, raising=False)
     monkeypatch.setattr(update_controller_module.sys, "executable", "/tmp/open-router-key-viewer", raising=False)
+    binary_updater = _FakeBinaryUpdater(relaunch_command=["/tmp/open-router-key-viewer-launcher"])
+    monkeypatch.setattr(
+        update_controller_module,
+        "build_update_runtime_context",
+        lambda: SimpleNamespace(
+            build_info=_FakeBuildInfo(),
+            binary_update_supported=True,
+            install_info=_InstalledFakeInstaller().inspect(),
+            binary_updater=binary_updater,
+            release_checker=_FakeReleaseChecker(),
+            release_url="https://example.com/releases",
+        ),
+    )
 
     host = _FakeHost()
     card = _FakeUpdateCard()
     controller = AboutUpdateController(host, card)
 
-    assert isinstance(controller._binary_updater, _FakeBinaryUpdater)
-    assert controller._binary_updater.kwargs["relaunch_command"] == ["/tmp/open-router-key-viewer-launcher"]
+    assert isinstance(controller._update_coordinator.binary_updater, _FakeBinaryUpdater)
+    assert controller._update_coordinator.binary_updater.kwargs["relaunch_command"] == [
+        "/tmp/open-router-key-viewer-launcher"
+    ]
 
 
 def test_install_success_uses_controlled_quit_path(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -4,8 +4,8 @@ from typing import Any
 
 import pytest
 
-import open_router_key_viewer.ui.controllers.query_controller as query_controller_module
-from open_router_key_viewer.ui.controllers.query_controller import QueryExecutionController
+import open_router_key_viewer.core.query_execution_controller as query_controller_module
+from open_router_key_viewer.core.query_execution_controller import QueryExecutionController
 
 
 class _FakeSignal:

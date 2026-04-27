@@ -27,8 +27,9 @@ with redirect_stdout(io.StringIO()):
         TitleLabel,
     )
 
+from open_router_key_viewer.core.settings_coordinator import SettingsActionResult, SettingsCoordinator
 from open_router_key_viewer.i18n import LANGUAGE_OPTIONS, tr
-from open_router_key_viewer.services.config_store import ConfigStore, ConfigStoreError
+from open_router_key_viewer.services.config_store import ConfigStore
 from open_router_key_viewer.services.settings_snapshot import SettingsSnapshotService
 from open_router_key_viewer.state import ConfigKey
 from open_router_key_viewer.state.app_metadata import DISPLAY_BACKEND_OPTIONS, THEME_MODE_OPTIONS
@@ -126,6 +127,7 @@ class CachePage(QWidget):
         self._mode = "data"
         self._file_text = ""
         self._snapshot_service = SettingsSnapshotService(config_store)
+        self._settings_coordinator = SettingsCoordinator(self._snapshot_service)
         self._switch_rows: dict[ConfigKey, SwitchSettingRow] = {}
         self._input_rows: dict[ConfigKey, InputSettingRow] = {}
         self._auto_query_rows: list[tuple[AutoQueryBinding, AutoQuerySettingRow]] = []
@@ -525,28 +527,7 @@ class CachePage(QWidget):
         backend = self.display_backend_combo.currentData()
         if not isinstance(backend, str):
             return
-        current_backend = self._snapshot_service.current_config().display_backend
-        if backend == current_backend:
-            return
-        try:
-            if backend == "auto":
-                self._snapshot_service.delete_value(ConfigKey.DISPLAY_BACKEND)
-            else:
-                self._snapshot_service.save_value(ConfigKey.DISPLAY_BACKEND, backend)
-        except ConfigStoreError as exc:
-            self._show_error(str(exc))
-            return
-        self.refresh_view()
-        InfoBar.success(
-            title=_tr("已保存"),
-            content=_tr("显示后端已更新，重启后生效"),
-            orient=Qt.Orientation.Horizontal,
-            isClosable=True,
-            position=InfoBarPosition.TOP_RIGHT,
-            duration=3000,
-            parent=self.window(),
-        )
-        self.on_runtime_settings_changed()
+        self._apply_settings_result(self._settings_coordinator.set_display_backend(backend))
 
     def _sync_language_combo(self, language_code: str) -> None:
         index = self.language_combo.findData(language_code)
@@ -561,15 +542,7 @@ class CachePage(QWidget):
         language_code = self.language_combo.currentData()
         if not isinstance(language_code, str):
             return
-        current_language = self._snapshot_service.current_config().ui_language
-        if language_code == current_language:
-            return
-        try:
-            self._snapshot_service.save_value(ConfigKey.UI_LANGUAGE, language_code)
-        except ConfigStoreError as exc:
-            self._show_error(str(exc))
-            return
-        self.on_language_changed(language_code)
+        self._apply_settings_result(self._settings_coordinator.set_language(language_code), show_success=False)
 
     def _sync_theme_mode_combo(self, theme_mode: str) -> None:
         index = self.theme_mode_combo.findData(theme_mode)
@@ -584,18 +557,7 @@ class CachePage(QWidget):
         theme_mode = self.theme_mode_combo.currentData()
         if not isinstance(theme_mode, str):
             return
-        current_theme_mode = self._snapshot_service.current_config().theme_mode
-        if theme_mode == current_theme_mode:
-            return
-        try:
-            if theme_mode == "auto":
-                self._snapshot_service.delete_value(ConfigKey.THEME_MODE)
-            else:
-                self._snapshot_service.save_value(ConfigKey.THEME_MODE, theme_mode)
-        except ConfigStoreError as exc:
-            self._show_error(str(exc))
-            return
-        self.on_theme_changed(theme_mode)
+        self._apply_settings_result(self._settings_coordinator.set_theme_mode(theme_mode), show_success=False)
 
     def _show_mode(self, mode: str) -> None:
         self._mode = mode
@@ -644,59 +606,20 @@ class CachePage(QWidget):
             self._input_rows[binding.key].retranslate_ui(_tr(binding.label), binding.placeholder)
 
     def _toggle_switch_value(self, config_key: ConfigKey, checked: bool) -> None:
-        try:
-            self._snapshot_service.save_value(config_key, checked)
-        except ConfigStoreError as exc:
-            self._show_error(str(exc))
+        result = self._settings_coordinator.set_switch(config_key, checked)
+        if not result.ok:
+            self._show_error(result.message)
             return
         if config_key == ConfigKey.SINGLE_INSTANCE_ENABLED:
             self._sync_runtime_option_state(checked)
-        self.refresh_view()
-        self.on_runtime_settings_changed()
+        self._apply_settings_result(result, show_success=False)
 
     def _sync_runtime_option_state(self, single_instance_enabled: bool) -> None:
         self.background_resident_row.setEnabled(single_instance_enabled)
         self.background_resident_row.setToolTip("" if single_instance_enabled else _tr("需先启用单实例模式"))
 
     def _save_input_value(self, config_key: ConfigKey, raw_value: str) -> None:
-        try:
-            if not raw_value:
-                self._snapshot_service.delete_value(config_key)
-            else:
-                value: object = raw_value
-                if config_key in {ConfigKey.POLL_KEY_INFO_INTERVAL_SECONDS, ConfigKey.POLL_CREDITS_INTERVAL_SECONDS}:
-                    try:
-                        value = max(1, int(raw_value))
-                    except ValueError:
-                        self._show_error(_tr("间隔必须是整数秒"))
-                        return
-                elif config_key in {
-                    ConfigKey.KEY_INFO_WARNING_THRESHOLD,
-                    ConfigKey.KEY_INFO_CRITICAL_THRESHOLD,
-                    ConfigKey.CREDITS_WARNING_THRESHOLD,
-                    ConfigKey.CREDITS_CRITICAL_THRESHOLD,
-                }:
-                    try:
-                        value = float(raw_value)
-                    except ValueError:
-                        self._show_error(_tr("阈值必须是数字"))
-                        return
-                self._snapshot_service.save_value(config_key, value)
-        except ConfigStoreError as exc:
-            self._show_error(str(exc))
-            return
-
-        self.refresh_view()
-        self.on_runtime_settings_changed()
-        InfoBar.success(
-            title=_tr("已保存"),
-            content=_tr("配置已更新"),
-            orient=Qt.Orientation.Horizontal,
-            isClosable=True,
-            position=InfoBarPosition.TOP_RIGHT,
-            duration=1500,
-            parent=self.window(),
-        )
+        self._apply_settings_result(self._settings_coordinator.set_input(config_key, raw_value))
 
     def _show_error(self, message: str) -> None:
         show_error_bar(self.window(), _tr("配置无效"), message)
@@ -704,34 +627,35 @@ class CachePage(QWidget):
     def _delete_config_file(self) -> None:
         if not self._confirm(_tr("删除配置文件"), _tr("确认删除 config.json 吗？")):
             return
-        try:
-            self._snapshot_service.delete_config_file()
-        except ConfigStoreError as exc:
-            self._show_error(str(exc))
-            return
-        self.on_global_config_changed()
-        InfoBar.success(
-            title=_tr("已删除"),
-            content=_tr("配置文件已删除"),
-            orient=Qt.Orientation.Horizontal,
-            isClosable=True,
-            position=InfoBarPosition.TOP_RIGHT,
-            duration=2000,
-            parent=self.window(),
-        )
+        self._apply_settings_result(self._settings_coordinator.delete_config_file())
 
     def _delete_config_dir(self) -> None:
         if not self._confirm(_tr("删除缓存目录"), _tr("确认删除整个 ~/.config/open-router-key-viewer 目录吗？")):
             return
-        try:
-            self._snapshot_service.delete_config_dir()
-        except ConfigStoreError as exc:
-            self._show_error(str(exc))
+        self._apply_settings_result(self._settings_coordinator.delete_config_dir())
+
+    def _apply_settings_result(self, result: SettingsActionResult, *, show_success: bool = True) -> None:
+        if not result.ok:
+            self._show_error(_tr(result.message))
             return
-        self.on_global_config_changed()
+        if result.effect is None:
+            return
+        self.refresh_view()
+        if result.effect == "runtime":
+            self.on_runtime_settings_changed()
+        elif result.effect == "global":
+            self.on_global_config_changed()
+        elif result.effect == "language" and isinstance(result.value, str):
+            self.on_language_changed(result.value)
+        elif result.effect == "theme" and isinstance(result.value, str):
+            self.on_theme_changed(result.value)
+        if show_success:
+            self._show_success(result.success_title, result.success_message)
+
+    def _show_success(self, title: str, message: str) -> None:
         InfoBar.success(
-            title=_tr("已删除"),
-            content=_tr("缓存目录已删除"),
+            title=_tr(title),
+            content=_tr(message),
             orient=Qt.Orientation.Horizontal,
             isClosable=True,
             position=InfoBarPosition.TOP_RIGHT,

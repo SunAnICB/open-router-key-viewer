@@ -37,8 +37,8 @@ class UpdateCoordinator:
         on_install_finished: Callable[[], None],
         on_install_ready_to_relaunch: Callable[[], None] | None = None,
         install_relaunch_delay_ms: int = 300,
-        check_worker_cls=UpdateCheckWorker,
-        install_worker_cls=UpdateInstallWorker,
+        check_worker_cls=None,
+        install_worker_cls=None,
         stop_thread_func=stop_thread,
     ) -> None:
         self.host = host
@@ -53,8 +53,8 @@ class UpdateCoordinator:
         self.on_install_finished = on_install_finished
         self.on_install_ready_to_relaunch = on_install_ready_to_relaunch
         self.install_relaunch_delay_ms = install_relaunch_delay_ms
-        self.check_worker_cls = check_worker_cls
-        self.install_worker_cls = install_worker_cls
+        self.check_worker_cls = check_worker_cls or UpdateCheckWorker
+        self.install_worker_cls = install_worker_cls or UpdateInstallWorker
         self.stop_thread_func = stop_thread_func
         self._check_worker: UpdateCheckWorker | None = None
         self._install_worker: UpdateInstallWorker | None = None

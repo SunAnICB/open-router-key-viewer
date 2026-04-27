@@ -16,9 +16,10 @@ with redirect_stdout(io.StringIO()):
         TitleLabel,
     )
 
-from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.core.query_coordinator import QueryCoordinator
-from open_router_key_viewer.services.config_store import ConfigStore, ConfigStoreError
+from open_router_key_viewer.core.secret_coordinator import SecretCoordinator
+from open_router_key_viewer.i18n import tr
+from open_router_key_viewer.services.config_store import ConfigStore
 from open_router_key_viewer.services.secret_cache import SecretCacheService
 from open_router_key_viewer.state import (
     QueryPageRenderModel,
@@ -55,7 +56,7 @@ class BaseQueryPage(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.secret_cache = SecretCacheService(config_store)
+        self.secret_coordinator = SecretCoordinator(SecretCacheService(config_store))
         self.query_state = query_state
         self.on_cache_changed = on_cache_changed
         self.on_query_success = on_query_success
@@ -149,10 +150,9 @@ class BaseQueryPage(QWidget):
             self._show_error(_tr(self.missing_secret_message))
             return
 
-        try:
-            self.secret_cache.save_secret(self.config_key, secret)
-        except ConfigStoreError as exc:
-            self._show_error(str(exc))
+        result = self.secret_coordinator.save_secret(self.config_key, secret)
+        if not result.ok:
+            self._show_error(result.message)
             return
         self.on_cache_changed()
         InfoBar.success(
@@ -200,10 +200,9 @@ class BaseQueryPage(QWidget):
         )
 
     def _clear_saved_secret(self) -> None:
-        try:
-            self.secret_cache.delete_secret(self.config_key)
-        except ConfigStoreError as exc:
-            self._show_error(str(exc))
+        result = self.secret_coordinator.delete_secret(self.config_key)
+        if not result.ok:
+            self._show_error(result.message)
             return
         self.secret_input.clear()
         self.on_cache_changed()
@@ -281,7 +280,7 @@ class BaseQueryPage(QWidget):
         )
 
     def load_cached_secret(self) -> None:
-        cached = self.secret_cache.load_secret(self.config_key)
+        cached = self.secret_coordinator.load_secret(self.config_key)
         if not cached:
             self.secret_input.clear()
             return

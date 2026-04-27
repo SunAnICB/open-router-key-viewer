@@ -4,9 +4,7 @@ import io
 import sys
 from collections.abc import Callable
 from contextlib import redirect_stdout
-from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -15,43 +13,17 @@ from PySide6.QtWidgets import QApplication, QWidget
 with redirect_stdout(io.StringIO()):
     from qfluentwidgets import InfoBar, InfoBarPosition, MessageBox
 
-from open_router_key_viewer import __version__
 from open_router_key_viewer.core.update_coordinator import UpdateCoordinator
+from open_router_key_viewer.core.update_runtime import build_update_runtime_context
+from open_router_key_viewer.core.update_state import UpdateStateMachine, UpdateStatus
+from open_router_key_viewer.core.threading import stop_thread
 from open_router_key_viewer.i18n import tr
-from open_router_key_viewer.services.build_info import get_build_info
-from open_router_key_viewer.services.installer import AppInstaller
-from open_router_key_viewer.services.update_checker import (
-    BinaryUpdater,
-    GitHubReleaseChecker,
-    ReleaseAsset,
-    UpdateCheckResult,
-    UpdateInstallError,
-)
+from open_router_key_viewer.services.update_checker import UpdateInstallError
 from open_router_key_viewer.state import (
     TextSpec,
     UpdateCardViewModel,
-    build_asset_note,
-    build_commit_note,
-    build_dev_build_state,
-    build_download_failed_state,
-    build_downloaded_state,
-    build_downloading_state,
-    build_latest_state,
-    build_update_available_state,
-    build_update_checking_state,
-    build_update_failure_state,
-    build_update_intro_state,
 )
-from open_router_key_viewer.state.app_metadata import (
-    APP_REPOSITORY_URL,
-    BINARY_ASSET_NAME,
-    DISPLAY_DATETIME_FORMAT,
-)
-from open_router_key_viewer.core.update_workers import UpdateCheckWorker, UpdateInstallWorker
-from open_router_key_viewer.core.threading import stop_thread
-from open_router_key_viewer.ui.runtime import (
-    show_error_bar,
-)
+from open_router_key_viewer.ui.runtime import show_error_bar
 from open_router_key_viewer.ui.widgets import UpdateCard
 
 _tr = tr
@@ -70,39 +42,21 @@ class AboutUpdateController:
         self.host = host
         self.update_card = update_card
         self._quit_application = quit_application or self._default_quit_application
-        self._release_url = APP_REPOSITORY_URL + "/releases"
-        self._latest_asset: ReleaseAsset | None = None
-        self._binary_update_supported = bool(getattr(sys, "frozen", False))
-        self._install_info = AppInstaller(
-            Path(sys.executable),
-            is_binary_runtime=self._binary_update_supported,
-        ).inspect()
-        relaunch_command = (
-            [str(self._install_info.launcher_path)]
-            if self._install_info.current_is_installed
-            else None
+        runtime_context = build_update_runtime_context()
+        self._binary_update_supported = runtime_context.binary_update_supported
+        self._build_info = runtime_context.build_info
+        self._update_state = UpdateStateMachine(
+            build_info=self._build_info,
+            binary_update_supported=self._binary_update_supported,
+            binary_updater=runtime_context.binary_updater,
         )
-        self._binary_updater = (
-            BinaryUpdater(Path(sys.executable), relaunch_command=relaunch_command)
-            if self._binary_update_supported
-            else None
-        )
-        self._build_info = get_build_info()
+        self._update_state.release_url = runtime_context.release_url
         self._startup_silent_check = False
         self._refresh_update_card_state: Callable[[], None] = lambda: None
-        if self._binary_updater is not None:
-            self._binary_updater.cleanup_stale_updates()
-        owner, repo = self._parse_repo(APP_REPOSITORY_URL)
-        self._release_checker = GitHubReleaseChecker(
-            owner,
-            repo,
-            asset_name=BINARY_ASSET_NAME,
-            current_version=__version__,
-        )
         self._update_coordinator = UpdateCoordinator(
             self.host,
-            checker=self._release_checker,
-            binary_updater=self._binary_updater,
+            checker=runtime_context.release_checker,
+            binary_updater=runtime_context.binary_updater,
             on_check_succeeded=self._handle_update_success,
             on_check_failed=self._handle_update_failure,
             on_check_finished=self._handle_update_finished,
@@ -111,8 +65,6 @@ class AboutUpdateController:
             on_install_failed=self._handle_install_failure,
             on_install_finished=self._handle_install_finished,
             on_install_ready_to_relaunch=self._quit_application,
-            check_worker_cls=UpdateCheckWorker,
-            install_worker_cls=UpdateInstallWorker,
             stop_thread_func=stop_thread,
         )
 
@@ -146,7 +98,7 @@ class AboutUpdateController:
         self._refresh_update_card_state()
 
     def show_intro_state(self) -> None:
-        self._apply_update_card_state(build_update_intro_state(self._binary_update_supported))
+        self._apply_update_status(self._update_state.intro())
         self._refresh_update_card_state = self.show_intro_state
 
     def check_updates(self) -> None:
@@ -158,21 +110,14 @@ class AboutUpdateController:
         self._start_update_check()
 
     def open_release_page(self) -> None:
-        if not self._release_url:
+        if not self._update_state.release_url:
             return
-        QDesktopServices.openUrl(QUrl(self._release_url))
+        QDesktopServices.openUrl(QUrl(self._update_state.release_url))
 
     def replace_current_binary(self) -> None:
-        if not self._binary_update_supported or self._binary_updater is None:
-            self._handle_update_failure(_tr("当前运行方式不支持直接替换二进制文件"))
-            return
-        if self._latest_asset is None:
-            self._handle_update_failure(_tr("当前未找到可替换的二进制更新文件"))
-            return
-
-        supported, reason = self._binary_updater.can_replace_current_binary()
-        if not supported:
-            self._handle_update_failure(reason or _tr("当前环境不支持替换二进制文件"))
+        replacement = self._update_state.prepare_replacement()
+        if not replacement.ok or replacement.asset is None:
+            self._handle_update_failure(_tr(replacement.error))
             return
 
         box = MessageBox(
@@ -189,11 +134,13 @@ class AboutUpdateController:
             self.update_card.check_button.setEnabled(False)
             self.update_card.release_button.setEnabled(False)
             self.update_card.replace_button.setEnabled(False)
-            self._show_downloading_state(
-                name=self._latest_asset.name,
-                meta=_tr("下载完成后将自动退出当前程序，替换二进制并重新启动。"),
+            self._show_status(
+                self._update_state.downloading(
+                    name=replacement.asset.name,
+                    meta="下载完成后将自动退出当前程序，替换二进制并重新启动。",
+                )
             )
-            self._update_coordinator.install_update(self._latest_asset)
+            self._update_coordinator.install_update(replacement.asset)
         except UpdateInstallError as exc:
             self._handle_update_failure(str(exc))
 
@@ -208,205 +155,23 @@ class AboutUpdateController:
         self.update_card.release_button.setEnabled(False)
         self.update_card.replace_button.setEnabled(False)
         if not self._startup_silent_check:
-            self._apply_update_card_state(build_update_checking_state())
+            self._show_status(self._update_state.checking())
             self._refresh_update_card_state = self._start_update_check_state
         self._update_coordinator.check_updates()
 
     def _start_update_check_state(self) -> None:
-        self._apply_update_card_state(build_update_checking_state())
+        self._show_status(self._update_state.checking())
         self._refresh_update_card_state = self._start_update_check_state
 
-    def _show_update_available_state(
-        self,
-        *,
-        current_version: str,
-        release_version: str,
-        asset_note: TextSpec,
-        published_at: str,
-        replace_note: str,
-        can_replace: bool,
-    ) -> None:
-        self._apply_update_card_state(
-            build_update_available_state(
-                current_version=current_version,
-                release_version=release_version,
-                asset_note=asset_note,
-                published_at=published_at,
-                replace_note=replace_note,
-                can_replace=can_replace,
-            ),
-        )
-        self._refresh_update_card_state = lambda: self._show_update_available_state(
-            current_version=current_version,
-            release_version=release_version,
-            asset_note=asset_note,
-            published_at=published_at,
-            replace_note=replace_note,
-            can_replace=can_replace,
-        )
-
-    def _show_dev_build_state(
-        self,
-        *,
-        current_version: str,
-        release_version: str,
-        tag_name: str,
-        published_at: str,
-        commit_note: TextSpec | None,
-    ) -> None:
-        self._apply_update_card_state(
-            build_dev_build_state(
-                current_version=current_version,
-                release_version=release_version,
-                tag_name=tag_name,
-                published_at=published_at,
-                commit_note=commit_note,
-            ),
-        )
-        self._refresh_update_card_state = lambda: self._show_dev_build_state(
-            current_version=current_version,
-            release_version=release_version,
-            tag_name=tag_name,
-            published_at=published_at,
-            commit_note=commit_note,
-        )
-
-    def _show_latest_state(self, *, current_version: str, tag_name: str, published_at: str) -> None:
-        self._apply_update_card_state(
-            build_latest_state(
-                current_version=current_version,
-                tag_name=tag_name,
-                published_at=published_at,
-            ),
-        )
-        self._refresh_update_card_state = lambda: self._show_latest_state(
-            current_version=current_version,
-            tag_name=tag_name,
-            published_at=published_at,
-        )
-
-    def _show_update_failure_state(self, message: str) -> None:
-        self._apply_update_card_state(build_update_failure_state(message))
-        self._refresh_update_card_state = lambda: self._show_update_failure_state(message)
-
-    def _show_downloading_state(self, *, name: str, meta: str, note: str | None = None) -> None:
-        self._apply_update_card_state(
-            build_downloading_state(
-                name=name,
-                note=TextSpec(note) if note is not None else None,
-                meta=TextSpec(meta),
-            )
-        )
-        self._refresh_update_card_state = lambda: self._show_downloading_state(
-            name=name,
-            meta=meta,
-            note=note or _tr("正在下载 {name}。").format(name=name),
-        )
-
-    def _show_downloaded_state(self, *, filename: str) -> None:
-        self._apply_update_card_state(build_downloaded_state(filename=filename))
-        self._refresh_update_card_state = lambda: self._show_downloaded_state(filename=filename)
-
-    def _show_download_failed_state(self, message: str) -> None:
-        self._apply_update_card_state(
-            build_download_failed_state(
-                message,
-                binary_update_supported=self._binary_update_supported,
-                has_asset=self._latest_asset is not None,
-            )
-        )
-        self._refresh_update_card_state = lambda: self._show_download_failed_state(message)
-
     def _handle_update_success(self, result: object) -> None:
-        release = result.latest_release
-        self._release_url = release.html_url
-        self._latest_asset = release.asset
-        asset_note = build_asset_note(release.asset.name if release.asset is not None else None)
-        can_replace = bool(result.update_available and self._binary_update_supported and release.asset is not None)
-        replace_note = ""
-        if can_replace and self._binary_updater is not None:
-            supported, reason = self._binary_updater.can_replace_current_binary()
-            can_replace = supported
-            if reason:
-                replace_note = f"  {reason}"
-        if result.update_available:
-            self._show_update_available_state(
-                current_version=result.current_version,
-                release_version=release.version,
-                asset_note=asset_note,
-                published_at=self._format_release_time(release.published_at),
-                replace_note=replace_note,
-                can_replace=can_replace,
-            )
-            if self._startup_silent_check:
-                InfoBar.info(
-                    title=_tr("发现新版本"),
-                    content=_tr("检测到 v{release.version} 可用，可在关于页查看并更新。").format(release=release),
-                    orient=Qt.Orientation.Horizontal,
-                    isClosable=True,
-                    position=InfoBarPosition.TOP_RIGHT,
-                    duration=5000,
-                    parent=self.host.window(),
-                )
-            return
-
-        is_dev_build = (
-            result.version_comparison < 0
-            or self._build_info.dirty
-            or (
-                bool(release.commit_sha)
-                and self._build_info.commit_sha != "unknown"
-                and self._build_info.commit_sha != release.commit_sha
-            )
-        )
-        if is_dev_build:
-            commit_note: TextSpec | None = None
-            if release.commit_sha:
-                commit_note = build_commit_note(
-                    self._short_commit(self._build_info.commit_sha),
-                    self._short_commit(release.commit_sha),
-                )
-            self._latest_asset = None
-            self._show_dev_build_state(
-                current_version=result.current_version,
-                release_version=release.version,
-                tag_name=release.tag_name,
-                published_at=self._format_release_time(release.published_at),
-                commit_note=commit_note,
-            )
-            if self._startup_silent_check:
-                InfoBar.info(
-                    title=_tr("当前是开发版本"),
-                    content=_tr("当前构建与最新 Release 不完全一致，可在关于页查看详情。"),
-                    orient=Qt.Orientation.Horizontal,
-                    isClosable=True,
-                    position=InfoBarPosition.TOP_RIGHT,
-                    duration=5000,
-                    parent=self.host.window(),
-                )
-            return
-
-        self._latest_asset = None
-        self._show_latest_state(
-            current_version=result.current_version,
-            tag_name=release.tag_name,
-            published_at=self._format_release_time(release.published_at),
-        )
+        self._show_status(self._update_state.handle_check_success(result, silent=self._startup_silent_check))
 
     def _handle_update_failure(self, message: str) -> None:
-        self._latest_asset = None
+        status = self._update_state.handle_check_failure(message, silent=self._startup_silent_check)
         if self._startup_silent_check:
-            InfoBar.warning(
-                title=_tr("自动检查更新失败"),
-                content=message,
-                orient=Qt.Orientation.Horizontal,
-                isClosable=True,
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=5000,
-                parent=self.host.window(),
-            )
+            self._show_status(status)
         else:
-            self._show_update_failure_state(message)
+            self._show_status(status)
             show_error_bar(self.host.window(), _tr("检查更新失败"), message)
 
     def _handle_update_finished(self) -> None:
@@ -415,26 +180,13 @@ class AboutUpdateController:
         self._startup_silent_check = False
 
     def _handle_install_progress(self, received: int, total: int) -> None:
-        if total > 0:
-            percent = int(received * 100 / total)
-            meta = _tr("已下载 {received} / {total} ({percent}%)").format(
-                received=self._format_bytes(received),
-                total=self._format_bytes(total),
-                percent=percent,
-            )
-        else:
-            meta = _tr("已下载 {received}").format(received=self._format_bytes(received))
-        self._show_downloading_state(
-            name="",
-            note=_tr("下载完成后将自动退出当前程序，替换二进制并重新启动。"),
-            meta=meta,
-        )
+        self._show_status(self._update_state.download_progress(received=received, total=total))
 
     def _handle_install_success(self) -> None:
-        self._show_downloaded_state(filename=Path(sys.executable).name)
+        self._show_status(self._update_state.downloaded(filename=Path(sys.executable).name))
 
     def _handle_install_failure(self, message: str) -> None:
-        self._show_download_failed_state(message)
+        self._show_status(self._update_state.download_failed(message))
         show_error_bar(self.host.window(), _tr("下载更新失败"), message)
 
     def _handle_install_finished(self) -> None:
@@ -442,6 +194,25 @@ class AboutUpdateController:
             return
         self.update_card.check_button.setEnabled(True)
         self.update_card.release_button.setEnabled(True)
+
+    def _show_status(self, status: UpdateStatus) -> None:
+        self._apply_update_status(status)
+        self._refresh_update_card_state = lambda: self._apply_update_card_state(status.view_model)
+
+    def _apply_update_status(self, status: UpdateStatus) -> None:
+        self._apply_update_card_state(status.view_model)
+        if not status.notification_title:
+            return
+        info_bar = InfoBar.warning if status.warning else InfoBar.info
+        info_bar(
+            title=_tr(status.notification_title),
+            content=_tr(status.notification_message),
+            orient=Qt.Orientation.Horizontal,
+            isClosable=True,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=5000,
+            parent=self.host.window(),
+        )
 
     def _apply_update_card_state(self, view_model: UpdateCardViewModel) -> None:
         self.update_card.set_state(
@@ -460,41 +231,6 @@ class AboutUpdateController:
             for key, value in spec.args.items()
         }
         return _tr(spec.source).format(**rendered_args)
-
-    @staticmethod
-    def _format_bytes(value: int) -> str:
-        units = ["B", "KB", "MB", "GB"]
-        size = float(value)
-        unit = units[0]
-        for unit in units:
-            if size < 1024 or unit == units[-1]:
-                break
-            size /= 1024
-        return f"{size:.1f} {unit}"
-
-    @staticmethod
-    def _short_commit(commit_sha: str) -> str:
-        stripped = commit_sha.strip()
-        if not stripped or stripped == "unknown":
-            return "unknown"
-        return stripped[:8]
-
-    @staticmethod
-    def _format_release_time(value: str) -> str:
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone().strftime(
-                DISPLAY_DATETIME_FORMAT
-            )
-        except ValueError:
-            return value or "-"
-
-    @staticmethod
-    def _parse_repo(url: str) -> tuple[str, str]:
-        parsed = urlparse(url)
-        parts = [part for part in parsed.path.strip("/").split("/") if part]
-        if len(parts) >= 2:
-            return parts[0], parts[1]
-        return "SunAnICB", "open-router-key-viewer"
 
     @staticmethod
     def _default_quit_application() -> None:

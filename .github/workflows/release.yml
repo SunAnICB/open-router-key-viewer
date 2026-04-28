@@ -40,8 +40,8 @@ jobs:
             $0 == "name = \"open-router-key-viewer\"" { in_root = 1; print; next }
             in_root && /^version = / { next }
             { print }
-          ' uv.lock > uv.lock.cachekey
-          echo "hash=$(sha256sum uv.lock.cachekey | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          ' uv.lock > "$RUNNER_TEMP/uv.lock.cachekey"
+          echo "hash=$(sha256sum "$RUNNER_TEMP/uv.lock.cachekey" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Cache uv downloads
         uses: actions/cache@v5
@@ -74,6 +74,9 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: uv run pytest
+
+      - name: Verify clean release workspace
+        run: git diff --exit-code && git diff --cached --exit-code && test -z "$(git status --short)"
 
       - name: Build release binary
         run: ./scripts/release.sh

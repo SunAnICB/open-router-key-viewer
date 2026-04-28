@@ -6,6 +6,7 @@ from open_router_key_viewer.services.alert_service import AlertService
 from open_router_key_viewer.services.config_store import ConfigStore
 from open_router_key_viewer.services.runtime_settings import RuntimeSettingsService
 from open_router_key_viewer.state import FloatingMetricsState, QueryState
+from open_router_key_viewer.state.floating_metrics import DEFAULT_FLOATING_METRICS, DEFAULT_PANEL_METRICS, RenderedMetric
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +38,9 @@ class ShellCoordinator:
     def panel_indicator_enabled(self) -> bool:
         return self.runtime_settings.panel_indicator_enabled()
 
+    def panel_rotation_interval_msec(self) -> int:
+        return self.runtime_settings.current_config().panel_rotation_interval_seconds * 1000
+
     def update_floating_metrics(self, mode: str, summary: dict[str, object]) -> FloatingMetricsState:
         success_time = (
             self.key_query_state.last_success_time
@@ -45,6 +49,19 @@ class ShellCoordinator:
         )
         self.floating_metrics.update(mode, summary, success_time)
         return self.floating_metrics
+
+    def render_floating_metrics(self) -> list[RenderedMetric]:
+        config = self.runtime_settings.current_config()
+        return self.floating_metrics.render(
+            config.floating_metrics,
+            config.metric_labels,
+            "floating",
+            DEFAULT_FLOATING_METRICS,
+        )
+
+    def render_panel_metrics(self) -> list[RenderedMetric]:
+        config = self.runtime_settings.current_config()
+        return self.floating_metrics.render(config.panel_metrics, config.metric_labels, "panel", DEFAULT_PANEL_METRICS)
 
     def evaluate_alert(self, mode: str, summary: dict[str, object]) -> ShellAlertPresentation | None:
         config = self.runtime_settings.current_config()

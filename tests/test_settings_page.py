@@ -100,6 +100,154 @@ def test_cache_page_syncs_runtime_capabilities_after_build(qapp) -> None:
     assert page.indicator_switch_row.isEnabled() is True
 
 
+def test_cache_page_saves_metric_display_config(qapp) -> None:
+    _ = qapp
+    store = _FakeConfigStore()
+    runtime_refreshes: list[str] = []
+    page = CachePage(
+        SettingsCoordinator(SettingsSnapshotService(store)),
+        lambda: runtime_refreshes.append("runtime"),
+        lambda: None,
+        lambda _code: None,
+        lambda _code: None,
+        lambda: None,
+        False,
+        False,
+    )
+
+    page._save_metric_display_config(
+        "panel",
+        ["credits_remaining"],
+        ["credits_remaining", "key_usage_daily"],
+        {"credits_remaining": "余"},
+        3,
+    )
+
+    assert store.payload["panel_metrics"] == ["credits_remaining"]
+    assert store.payload["panel_metric_order"][:2] == ["credits_remaining", "key_usage_daily"]
+    assert store.payload["metric_labels"]["credits_remaining"]["panel"] == "余"
+    assert store.payload["panel_rotation_interval_seconds"] == 3
+    assert runtime_refreshes == ["runtime"]
+
+
+def test_cache_page_refreshes_metric_dialog_after_normalized_save(qapp) -> None:
+    _ = qapp
+    store = _FakeConfigStore()
+    page = CachePage(
+        SettingsCoordinator(SettingsSnapshotService(store)),
+        lambda: None,
+        lambda: None,
+        lambda _code: None,
+        lambda _code: None,
+        lambda: None,
+        False,
+        False,
+    )
+    page._open_metric_dialog("panel")
+    panel = page._metric_panels["panel"]
+
+    page._save_metric_display_config(
+        "panel",
+        ["key_remaining"],
+        ["key_remaining"],
+        {"key_remaining": ""},
+        999,
+    )
+
+    assert store.payload["panel_rotation_interval_seconds"] == 60
+    assert panel.interval_input.text() == "60"
+    assert panel.rows_layout.itemAt(0).widget().label() == "配额"
+    page._metric_dialogs["panel"].close()
+
+
+def test_cache_page_resets_panel_metric_dialog_state(qapp) -> None:
+    _ = qapp
+    store = _FakeConfigStore()
+    store.payload = {
+        "panel_metrics": ["credits_remaining"],
+        "panel_metric_order": ["credits_remaining", "key_usage_daily", "key_remaining"],
+        "panel_rotation_interval_seconds": 9,
+        "metric_labels": {"credits_remaining": {"panel": "余"}},
+    }
+    page = CachePage(
+        SettingsCoordinator(SettingsSnapshotService(store)),
+        lambda: None,
+        lambda: None,
+        lambda _code: None,
+        lambda _code: None,
+        lambda: None,
+        False,
+        False,
+    )
+    page._open_metric_dialog("panel")
+    panel = page._metric_panels["panel"]
+
+    result = page._settings_coordinator.reset_metric_display_target("panel")
+    assert result.success_message == "顶栏指示器显示指标已恢复默认"
+
+    panel.reset_button.clicked.emit()
+
+    assert store.payload["panel_metrics"] == ["key_remaining", "credits_remaining"]
+    assert store.payload["panel_metric_order"][:5] == [
+        "key_remaining",
+        "key_usage_daily",
+        "key_usage_weekly",
+        "key_usage_monthly",
+        "credits_remaining",
+    ]
+    assert store.payload["panel_rotation_interval_seconds"] == 4
+    assert panel.rows_layout.itemAt(0).widget().definition.id == "key_remaining"
+    assert panel.rows_layout.itemAt(0).widget().enabled() is True
+    assert panel.rows_layout.itemAt(0).widget().label() == "配额"
+    assert panel.rows_layout.itemAt(1).widget().enabled() is False
+    assert panel.rows_layout.itemAt(4).widget().enabled() is True
+    assert panel.rows_layout.itemAt(4).widget().label() == "余额"
+    page._metric_dialogs["panel"].close()
+
+
+def test_cache_page_resets_floating_metric_dialog_state(qapp) -> None:
+    _ = qapp
+    store = _FakeConfigStore()
+    store.payload = {
+        "floating_metrics": ["credits_remaining"],
+        "floating_metric_order": ["credits_remaining", "key_usage_daily", "key_remaining"],
+        "metric_labels": {"credits_remaining": {"floating": "账"}},
+    }
+    page = CachePage(
+        SettingsCoordinator(SettingsSnapshotService(store)),
+        lambda: None,
+        lambda: None,
+        lambda _code: None,
+        lambda _code: None,
+        lambda: None,
+        False,
+        False,
+    )
+    page._open_metric_dialog("floating")
+    panel = page._metric_panels["floating"]
+
+    result = page._settings_coordinator.reset_metric_display_target("floating")
+    assert result.success_message == "悬浮小窗显示指标已恢复默认"
+
+    panel.reset_button.clicked.emit()
+
+    assert store.payload["floating_metrics"] == ["key_remaining", "credits_remaining"]
+    assert store.payload["floating_metric_order"][:5] == [
+        "key_remaining",
+        "key_usage_daily",
+        "key_usage_weekly",
+        "key_usage_monthly",
+        "credits_remaining",
+    ]
+    assert panel.rows_layout.itemAt(0).widget().definition.id == "key_remaining"
+    assert panel.rows_layout.itemAt(0).widget().enabled() is True
+    assert panel.rows_layout.itemAt(0).widget().label() == "剩余配额"
+    assert panel.rows_layout.itemAt(1).widget().enabled() is False
+    assert panel.rows_layout.itemAt(4).widget().enabled() is True
+    assert panel.rows_layout.itemAt(4).widget().label() == "账户余额"
+    page._metric_dialogs["floating"].close()
+
+
 def test_language_and_theme_changes_are_deferred(qapp) -> None:
     app = qapp
     language_changes: list[str] = []

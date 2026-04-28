@@ -1,10 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import MISSING, dataclass, field, fields
 from enum import StrEnum
 from typing import Any, get_args, get_origin, get_type_hints
 
 from open_router_key_viewer.i18n import resolve_language_code
+from open_router_key_viewer.state.floating_metrics import (
+    DEFAULT_FLOATING_METRICS,
+    DEFAULT_PANEL_METRICS,
+    DEFAULT_PANEL_ROTATION_INTERVAL_SECONDS,
+    clamp_panel_rotation_interval,
+    normalize_metric_ids,
+    normalize_metric_labels,
+    normalize_metric_order,
+    order_metric_ids,
+)
 
 
 class ConfigKey(StrEnum):
@@ -23,6 +33,12 @@ class ConfigKey(StrEnum):
     POLL_CREDITS_ENABLED = "poll_credits_enabled"
     POLL_CREDITS_INTERVAL_SECONDS = "poll_credits_interval_seconds"
     PANEL_INDICATOR_ENABLED = "panel_indicator_enabled"
+    FLOATING_METRICS = "floating_metrics"
+    PANEL_METRICS = "panel_metrics"
+    FLOATING_METRIC_ORDER = "floating_metric_order"
+    PANEL_METRIC_ORDER = "panel_metric_order"
+    METRIC_LABELS = "metric_labels"
+    PANEL_ROTATION_INTERVAL_SECONDS = "panel_rotation_interval_seconds"
     NOTIFY_IN_APP = "notify_in_app"
     NOTIFY_SYSTEM = "notify_system"
     KEY_INFO_WARNING_THRESHOLD = "key_info_warning_threshold"
@@ -56,6 +72,12 @@ CONFIG_LABELS: dict[str, str] = {
     ConfigKey.POLL_CREDITS_ENABLED: "启用账户余额定时查询",
     ConfigKey.POLL_CREDITS_INTERVAL_SECONDS: "账户余额间隔（秒）",
     ConfigKey.PANEL_INDICATOR_ENABLED: "启用顶栏指示器",
+    ConfigKey.FLOATING_METRICS: "悬浮小窗显示指标",
+    ConfigKey.PANEL_METRICS: "顶栏指示器显示指标",
+    ConfigKey.FLOATING_METRIC_ORDER: "悬浮小窗指标顺序",
+    ConfigKey.PANEL_METRIC_ORDER: "顶栏指示器指标顺序",
+    ConfigKey.METRIC_LABELS: "指标显示名称",
+    ConfigKey.PANEL_ROTATION_INTERVAL_SECONDS: "顶栏指标切换间隔（秒）",
     ConfigKey.NOTIFY_IN_APP: "启用应用内通知",
     ConfigKey.NOTIFY_SYSTEM: "启用系统通知",
     ConfigKey.KEY_INFO_WARNING_THRESHOLD: "Key 配额 Warning 阈值",
@@ -106,6 +128,12 @@ class AppConfig:
     poll_credits_enabled: bool = False
     poll_credits_interval_seconds: int = 300
     panel_indicator_enabled: bool = False
+    floating_metrics: list[str] = field(default_factory=lambda: list(DEFAULT_FLOATING_METRICS))
+    panel_metrics: list[str] = field(default_factory=lambda: list(DEFAULT_PANEL_METRICS))
+    floating_metric_order: list[str] = field(default_factory=list)
+    panel_metric_order: list[str] = field(default_factory=list)
+    metric_labels: dict[str, dict[str, str]] = field(default_factory=dict)
+    panel_rotation_interval_seconds: int = DEFAULT_PANEL_ROTATION_INTERVAL_SECONDS
     notify_in_app: bool = True
     notify_system: bool = True
     key_info_warning_threshold: float = 5.0
@@ -124,17 +152,38 @@ class AppConfig:
         payload = raw or {}
         kwargs: dict[str, Any] = {}
         type_hints = get_type_hints(cls)
-        for field in fields(cls):
-            raw_value = payload.get(field.name, field.default)
-            if field.name == "ui_language":
-                raw_value = payload.get(field.name)
-            kwargs[field.name] = _coerce_value(raw_value, field.default, type_hints[field.name])
+        for config_field in fields(cls):
+            default = (
+                config_field.default_factory()
+                if config_field.default is MISSING and config_field.default_factory is not MISSING
+                else config_field.default
+            )
+            raw_value = payload.get(config_field.name, default)
+            if config_field.name == "ui_language":
+                raw_value = payload.get(config_field.name)
+            kwargs[config_field.name] = _coerce_value(raw_value, default, type_hints[config_field.name])
         config = cls(**kwargs)
         if config.display_backend not in DISPLAY_BACKEND_VALUES:
             config.display_backend = "auto"
         config.ui_language = resolve_language_code(payload.get("ui_language"))
         if config.theme_mode not in THEME_MODE_VALUES:
             config.theme_mode = "auto"
+        config.floating_metrics = normalize_metric_ids(config.floating_metrics, DEFAULT_FLOATING_METRICS)
+        config.panel_metrics = normalize_metric_ids(config.panel_metrics, DEFAULT_PANEL_METRICS)
+        config.floating_metric_order = normalize_metric_order(config.floating_metric_order)
+        config.panel_metric_order = normalize_metric_order(config.panel_metric_order)
+        config.floating_metrics = order_metric_ids(
+            config.floating_metrics,
+            config.floating_metric_order,
+            DEFAULT_FLOATING_METRICS,
+        )
+        config.panel_metrics = order_metric_ids(
+            config.panel_metrics,
+            config.panel_metric_order,
+            DEFAULT_PANEL_METRICS,
+        )
+        config.metric_labels = normalize_metric_labels(config.metric_labels)
+        config.panel_rotation_interval_seconds = clamp_panel_rotation_interval(config.panel_rotation_interval_seconds)
         return config
 
     def to_raw_dict(self) -> dict[str, Any]:
@@ -176,6 +225,10 @@ def _coerce_value(value: Any, default: Any, annotation: Any) -> Any:
             return default
     if target_type is str:
         return value if isinstance(value, str) else default
+    if target_type is list:
+        return value if isinstance(value, list) else default
+    if target_type is dict:
+        return value if isinstance(value, dict) else default
     return value
 
 
@@ -183,6 +236,8 @@ def _resolve_type(annotation: Any) -> Any:
     origin = get_origin(annotation)
     if origin is None:
         return annotation
+    if origin in {list, dict}:
+        return origin
     args = [arg for arg in get_args(annotation) if arg is not type(None)]
     return args[0] if args else annotation
 

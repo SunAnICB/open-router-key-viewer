@@ -6,6 +6,16 @@ from typing import Any, Literal
 from open_router_key_viewer.services.config_store import ConfigStoreError
 from open_router_key_viewer.services.settings_snapshot import SettingsSnapshotService
 from open_router_key_viewer.state import AppConfig, ConfigKey
+from open_router_key_viewer.state.floating_metrics import (
+    DEFAULT_FLOATING_METRICS,
+    DEFAULT_METRIC_ORDER,
+    DEFAULT_PANEL_METRICS,
+    DEFAULT_PANEL_ROTATION_INTERVAL_SECONDS,
+    clamp_panel_rotation_interval,
+    normalize_metric_ids,
+    normalize_metric_labels,
+    normalize_metric_order,
+)
 from open_router_key_viewer.state.settings_view_model import SettingsSnapshotViewModel
 
 SettingsEffect = Literal["runtime", "language", "theme", "global"]
@@ -90,6 +100,67 @@ class SettingsCoordinator:
             return self._error(exc)
         return SettingsActionResult(ok=True, effect="runtime")
 
+    def set_metric_display_target(
+        self,
+        *,
+        target: Literal["floating", "panel"],
+        metrics: list[str],
+        metric_order: list[str],
+        labels: dict[str, str],
+        panel_rotation_interval_seconds: int | None = None,
+    ) -> SettingsActionResult:
+        current = self.current_config()
+        next_labels = normalize_metric_labels(current.metric_labels)
+        for metric_id, label in labels.items():
+            if metric_id not in next_labels:
+                continue
+            next_labels[metric_id][target] = label
+        try:
+            if target == "floating":
+                self.snapshot_service.save_value(
+                    ConfigKey.FLOATING_METRICS,
+                    normalize_metric_ids(metrics, DEFAULT_FLOATING_METRICS),
+                )
+                self.snapshot_service.save_value(ConfigKey.FLOATING_METRIC_ORDER, normalize_metric_order(metric_order))
+            else:
+                self.snapshot_service.save_value(
+                    ConfigKey.PANEL_METRICS,
+                    normalize_metric_ids(metrics, DEFAULT_PANEL_METRICS),
+                )
+                self.snapshot_service.save_value(ConfigKey.PANEL_METRIC_ORDER, normalize_metric_order(metric_order))
+                if panel_rotation_interval_seconds is not None:
+                    self.snapshot_service.save_value(
+                        ConfigKey.PANEL_ROTATION_INTERVAL_SECONDS,
+                        clamp_panel_rotation_interval(panel_rotation_interval_seconds),
+                    )
+            self.snapshot_service.save_value(ConfigKey.METRIC_LABELS, next_labels)
+        except ConfigStoreError as exc:
+            return self._error(exc)
+        return SettingsActionResult(ok=True, effect="runtime", success_message="显示指标已更新")
+
+    def reset_metric_display_target(self, target: Literal["floating", "panel"]) -> SettingsActionResult:
+        current = self.current_config()
+        next_labels = normalize_metric_labels(current.metric_labels)
+        default_labels = normalize_metric_labels({})
+        for metric_id, labels in next_labels.items():
+            labels[target] = default_labels[metric_id][target]
+        try:
+            if target == "floating":
+                self.snapshot_service.save_value(ConfigKey.FLOATING_METRICS, list(DEFAULT_FLOATING_METRICS))
+                self.snapshot_service.save_value(ConfigKey.FLOATING_METRIC_ORDER, list(DEFAULT_METRIC_ORDER))
+            else:
+                self.snapshot_service.save_value(ConfigKey.PANEL_METRICS, list(DEFAULT_PANEL_METRICS))
+                self.snapshot_service.save_value(ConfigKey.PANEL_METRIC_ORDER, list(DEFAULT_METRIC_ORDER))
+                self.snapshot_service.save_value(
+                    ConfigKey.PANEL_ROTATION_INTERVAL_SECONDS,
+                    DEFAULT_PANEL_ROTATION_INTERVAL_SECONDS,
+                )
+            self.snapshot_service.save_value(ConfigKey.METRIC_LABELS, next_labels)
+        except ConfigStoreError as exc:
+            return self._error(exc)
+        message = "悬浮小窗显示指标已恢复默认" if target == "floating" else "顶栏指示器显示指标已恢复默认"
+        return SettingsActionResult(ok=True, effect="runtime", success_message=message)
+
     def delete_config_file(self) -> SettingsActionResult:
         try:
             self.snapshot_service.delete_config_file()
@@ -106,7 +177,11 @@ class SettingsCoordinator:
 
     @staticmethod
     def _parse_input_value(config_key: ConfigKey, raw_value: str) -> Any:
-        if config_key in {ConfigKey.POLL_KEY_INFO_INTERVAL_SECONDS, ConfigKey.POLL_CREDITS_INTERVAL_SECONDS}:
+        if config_key in {
+            ConfigKey.POLL_KEY_INFO_INTERVAL_SECONDS,
+            ConfigKey.POLL_CREDITS_INTERVAL_SECONDS,
+            ConfigKey.PANEL_ROTATION_INTERVAL_SECONDS,
+        }:
             try:
                 return max(1, int(raw_value))
             except ValueError as exc:

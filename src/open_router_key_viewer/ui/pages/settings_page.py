@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QFrame, QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 
 with redirect_stdout(io.StringIO()):
     from qfluentwidgets import (
@@ -26,6 +26,7 @@ with redirect_stdout(io.StringIO()):
         StrongBodyLabel,
         TextEdit,
         TitleLabel,
+        TransparentToolButton,
     )
 
 from open_router_key_viewer.core.settings_coordinator import SettingsActionResult, SettingsCoordinator
@@ -38,6 +39,7 @@ from open_router_key_viewer.ui.pages.settings_widgets import (
     InputSettingRow,
     PropertyRowsPanel,
     SwitchSettingRow,
+    TargetMetricDisplayConfigPanel,
 )
 from open_router_key_viewer.ui.runtime import show_error_bar
 from open_router_key_viewer.ui.widgets import MetricCard, PathActionCard, WarningCard
@@ -129,6 +131,8 @@ class CachePage(QWidget):
         self._switch_rows: dict[ConfigKey, SwitchSettingRow] = {}
         self._input_rows: dict[ConfigKey, InputSettingRow] = {}
         self._auto_query_rows: list[tuple[AutoQueryBinding, AutoQuerySettingRow]] = []
+        self._metric_dialogs: dict[str, QDialog] = {}
+        self._metric_panels: dict[str, TargetMetricDisplayConfigPanel] = {}
         self._build_ui()
         self.refresh_view()
 
@@ -221,8 +225,8 @@ class CachePage(QWidget):
         root.addWidget(summary_card)
 
         root.addWidget(self._build_floating_card())
-        root.addWidget(self._build_runtime_card())
         root.addWidget(self._build_indicator_card())
+        root.addWidget(self._build_runtime_card())
         root.addWidget(self._build_auto_query_card())
         root.addWidget(self._build_alerts_card())
         root.addWidget(self._build_update_card())
@@ -241,7 +245,7 @@ class CachePage(QWidget):
         self.floating_title_label = StrongBodyLabel(_tr("悬浮小窗"), card)
         text_layout.addWidget(self.floating_title_label)
         hint_text = (
-            _tr("切换到仅显示剩余配额和账户余额的顶层小窗。")
+            _tr("切换到仅显示关键指标的顶层小窗。")
             if self.floating_window_supported
             else _tr("当前仅在 X11/xcb 启动时支持悬浮小窗。")
         )
@@ -250,6 +254,11 @@ class CachePage(QWidget):
         text_layout.addWidget(self.floating_hint_label)
         layout.addLayout(text_layout, 1)
 
+        self.floating_metric_button = TransparentToolButton(card)
+        self.floating_metric_button.setIcon(FluentIcon.SETTING)
+        self.floating_metric_button.setToolTip(_tr("配置显示指标"))
+        self.floating_metric_button.clicked.connect(lambda _checked=False: self._open_metric_dialog("floating"))
+        layout.addWidget(self.floating_metric_button)
         self.open_floating_button = PrimaryPushButton(_tr("打开悬浮小窗"), card)
         self.open_floating_button.setIcon(FluentIcon.OPEN_PANE if hasattr(FluentIcon, "OPEN_PANE") else FluentIcon.HOME)
         self.open_floating_button.clicked.connect(self.on_open_floating_window)
@@ -278,6 +287,12 @@ class CachePage(QWidget):
         text_layout.addWidget(self.indicator_hint_label)
         layout.addLayout(text_layout, 1)
 
+        self.indicator_metric_button = TransparentToolButton(card)
+        self.indicator_metric_button.setIcon(FluentIcon.SETTING)
+        self.indicator_metric_button.setToolTip(_tr("配置显示指标"))
+        self.indicator_metric_button.clicked.connect(lambda _checked=False: self._open_metric_dialog("panel"))
+        self.indicator_metric_button.setEnabled(self.indicator_available)
+        layout.addWidget(self.indicator_metric_button)
         self.indicator_switch_row = self._create_switch_row(_tr("启用顶栏指示器"), ConfigKey.PANEL_INDICATOR_ENABLED, card)
         self.indicator_switch_row.setEnabled(self.indicator_available)
         layout.addWidget(self.indicator_switch_row)
@@ -415,11 +430,12 @@ class CachePage(QWidget):
         self.file_count_card.set_title(_tr("目录内文件"))
         self.floating_title_label.setText(_tr("悬浮小窗"))
         self.floating_hint_label.setText(
-            _tr("切换到仅显示剩余配额和账户余额的顶层小窗。")
+            _tr("切换到仅显示关键指标的顶层小窗。")
             if self.floating_window_supported
             else _tr("当前仅在 X11/xcb 启动时支持悬浮小窗。")
         )
         self.open_floating_button.setText(_tr("打开悬浮小窗"))
+        self.floating_metric_button.setToolTip(_tr("配置显示指标"))
         self.indicator_title_label.setText(_tr("顶栏指示器"))
         self.indicator_hint_label.setText(
             _tr("在 GNOME 顶栏显示滚动的配额和余额数据（Ubuntu 开箱即用，其他发行版需安装 AppIndicator 扩展）。")
@@ -427,6 +443,7 @@ class CachePage(QWidget):
             else _tr("当前环境不支持顶栏指示器（需要 D-Bus StatusNotifierWatcher 服务）。")
         )
         self.indicator_switch_row.retranslate_ui(_tr("启用顶栏指示器"))
+        self.indicator_metric_button.setToolTip(_tr("配置显示指标"))
         self.runtime_title_label.setText(_tr("运行行为"))
         self.runtime_hint_label.setText(_tr("单实例用于阻止重复启动；“关闭窗口时驻留后台”仅在启用单实例模式后可用。"))
         self.single_instance_row.retranslate_ui(_tr("启用单实例模式"))
@@ -451,7 +468,7 @@ class CachePage(QWidget):
         self.floating_window_supported = floating_window_supported
         self.indicator_available = indicator_available
         self.floating_hint_label.setText(
-            _tr("切换到仅显示剩余配额和账户余额的顶层小窗。")
+            _tr("切换到仅显示关键指标的顶层小窗。")
             if self.floating_window_supported
             else _tr("当前仅在 X11/xcb 启动时支持悬浮小窗。")
         )
@@ -462,6 +479,7 @@ class CachePage(QWidget):
             else _tr("当前环境不支持顶栏指示器（需要 D-Bus StatusNotifierWatcher 服务）。")
         )
         self.indicator_switch_row.setEnabled(self.indicator_available)
+        self.indicator_metric_button.setEnabled(self.indicator_available)
 
     def refresh_view(self) -> None:
         snapshot_view = self._settings_coordinator.build_snapshot()
@@ -479,7 +497,6 @@ class CachePage(QWidget):
         for key, row in self._switch_rows.items():
             row.sync_state(bool(getattr(config, key.value)))
         self._sync_runtime_option_state(config.single_instance_enabled)
-
         for key, row in self._input_rows.items():
             row.sync_value(getattr(config, key.value))
 
@@ -619,6 +636,88 @@ class CachePage(QWidget):
 
     def _save_input_value(self, config_key: ConfigKey, raw_value: str) -> None:
         self._apply_settings_result(self._settings_coordinator.set_input(config_key, raw_value))
+
+    def _save_metric_display_config(
+        self,
+        target: str,
+        metrics: list[str],
+        metric_order: list[str],
+        labels: dict[str, str],
+        panel_rotation_interval_seconds: int | None,
+    ) -> None:
+        panel = self._metric_panels.get(target)
+        result = self._settings_coordinator.set_metric_display_target(
+            target="floating" if target == "floating" else "panel",
+            metrics=metrics,
+            metric_order=metric_order,
+            labels=labels,
+            panel_rotation_interval_seconds=panel_rotation_interval_seconds,
+        )
+        if not result.ok:
+            self._show_error(_tr(result.message))
+            return
+
+        if panel is not None:
+            panel.refresh_from_config(self._settings_coordinator.current_config())
+        self.refresh_view()
+        self.on_runtime_settings_changed()
+
+    def _reset_metric_display_config(self, target: str) -> None:
+        panel = self._metric_panels.get(target)
+        if panel is not None:
+            panel.suspend_saving()
+        result = self._settings_coordinator.reset_metric_display_target("floating" if target == "floating" else "panel")
+        if not result.ok:
+            if panel is not None:
+                panel.resume_saving()
+            self._show_error(_tr(result.message))
+            return
+
+        if panel is not None:
+            panel.refresh_from_config(self._settings_coordinator.current_config())
+        self.refresh_view()
+        self.on_runtime_settings_changed()
+        self._show_success(result.success_title, result.success_message)
+
+    def _open_metric_dialog(self, target: str) -> None:
+        existing = self._metric_dialogs.get(target)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+
+        dialog = QDialog(self.window())
+        dialog.setWindowTitle(_tr("悬浮小窗显示指标") if target == "floating" else _tr("顶栏指示器显示指标"))
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 18, 20, 20)
+        layout.setSpacing(12)
+        title = StrongBodyLabel(dialog.windowTitle(), dialog)
+        layout.addWidget(title)
+        panel = TargetMetricDisplayConfigPanel(
+            "floating" if target == "floating" else "panel",
+            lambda metrics, order, labels, interval, current=target: self._save_metric_display_config(
+                current,
+                metrics,
+                order,
+                labels,
+                interval,
+            ),
+            lambda _checked=False, current=target: self._reset_metric_display_config(current),
+            dialog,
+        )
+        panel.sync_config(self._settings_coordinator.current_config())
+        layout.addWidget(panel)
+        dialog.setMinimumWidth(560)
+        dialog.finished.connect(lambda _result, current=target: self._discard_metric_dialog(current))
+        self._metric_dialogs[target] = dialog
+        self._metric_panels[target] = panel
+        dialog.show()
+
+    def _discard_metric_dialog(self, target: str) -> None:
+        self._metric_dialogs.pop(target, None)
+        panel = self._metric_panels.pop(target, None)
+        if panel is not None:
+            panel.deactivate()
 
     def _show_error(self, message: str) -> None:
         show_error_bar(self.window(), _tr("配置无效"), message)

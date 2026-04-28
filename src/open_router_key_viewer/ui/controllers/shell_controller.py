@@ -46,7 +46,7 @@ class WindowShellController:
         self._tray_icon: QSystemTrayIcon | None = None
         self._sni_tray: SNITray | None = None  # type: ignore[assignment]
         self._panel_label_timer: QTimer | None = None
-        self._panel_label_phase = 0
+        self._panel_label_index = 0
         self._background_hint_shown = False
         self.floating_window: FloatingWindow | None = None
         if self._floating_window_supported:
@@ -77,6 +77,7 @@ class WindowShellController:
 
     def apply_indicator_settings(self) -> None:
         want_enabled = self._indicator_available and self._shell_coordinator.panel_indicator_enabled()
+        self._restart_panel_label_rotation_if_needed()
 
         if self._sni_tray is None or not self._sni_tray.is_active:
             if want_enabled:
@@ -92,6 +93,7 @@ class WindowShellController:
                     if self._tray_icon is not None:
                         self._tray_icon.hide()
                         self._tray_icon = None
+            self.sync_metric_views()
             return
 
         if want_enabled:
@@ -104,12 +106,16 @@ class WindowShellController:
                 self._panel_label_timer.stop()
                 self._panel_label_timer.deleteLater()
                 self._panel_label_timer = None
+        self.sync_metric_views()
 
     def retranslate_ui(self) -> None:
         if self.floating_window is not None:
             self.floating_window.retranslate_ui()
         self._sync_floating_window()
         self._sync_panel_label()
+
+    def sync_metric_views(self) -> None:
+        self._sync_floating_window()
 
     def show_floating_window(self) -> None:
         if self.floating_window is None:
@@ -211,24 +217,40 @@ class WindowShellController:
         QApplication.instance().setWindowIcon(icon)
 
     def _start_panel_label_rotation(self) -> None:
+        if self._panel_label_timer is not None:
+            self._panel_label_timer.stop()
+            self._panel_label_timer.deleteLater()
         self._panel_label_timer = QTimer(self.host)
         self._panel_label_timer.timeout.connect(self._rotate_panel_label)
-        self._panel_label_timer.start(4000)
+        self._panel_label_timer.start(self._shell_coordinator.panel_rotation_interval_msec())
         self._sync_panel_label()
 
     def _rotate_panel_label(self) -> None:
-        self._panel_label_phase = 1 - self._panel_label_phase
+        metrics = self._shell_coordinator.render_panel_metrics()
+        if metrics:
+            self._panel_label_index = (self._panel_label_index + 1) % len(metrics)
         self._sync_panel_label()
 
     def _sync_panel_label(self) -> None:
         if self._sni_tray is None or not self._sni_tray.is_active:
             return
-        text = (
-            f"{_tr('配额')} {self._shell_coordinator.floating_metrics.key_value}"
-            if self._panel_label_phase == 0
-            else f"{_tr('余额')} {self._shell_coordinator.floating_metrics.credits_value}"
-        )
-        self._sni_tray.set_label(text, f"{_tr('余额')} $99.9999")
+        metrics = self._shell_coordinator.render_panel_metrics()
+        if not metrics:
+            self._sni_tray.set_label("-", APP_DISPLAY_NAME)
+            return
+        self._panel_label_index %= len(metrics)
+        metric = metrics[self._panel_label_index]
+        text = f"{_tr(metric.label)} {metric.value}"
+        tooltip = f"{_tr(metric.label)} {metric.value}  {metric.refreshed_at}"
+        self._sni_tray.set_label(text, tooltip)
+
+    def _restart_panel_label_rotation_if_needed(self) -> None:
+        if self._panel_label_timer is None:
+            return
+        interval = self._shell_coordinator.panel_rotation_interval_msec()
+        if self._panel_label_timer.interval() == interval:
+            return
+        self._panel_label_timer.start(interval)
 
     def _create_floating_window(self, topmost: bool) -> FloatingWindow:
         window = FloatingWindow()
@@ -270,12 +292,7 @@ class WindowShellController:
 
     def _sync_floating_window(self) -> None:
         if self.floating_window is not None:
-            self.floating_window.update_metrics(
-                self._shell_coordinator.floating_metrics.key_value,
-                self._shell_coordinator.floating_metrics.key_time,
-                self._shell_coordinator.floating_metrics.credits_value,
-                self._shell_coordinator.floating_metrics.credits_time,
-            )
+            self.floating_window.update_metrics(self._shell_coordinator.render_floating_metrics())
         self._sync_panel_label()
 
     def _evaluate_thresholds(self, mode: str, summary: dict[str, object]) -> None:

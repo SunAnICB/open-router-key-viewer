@@ -28,6 +28,7 @@ with redirect_stdout(io.StringIO()):
 
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.state.app_metadata import APP_DISPLAY_NAME
+from open_router_key_viewer.state.floating_metrics import RenderedMetric
 from open_router_key_viewer.state.progress import ProgressState
 
 _tr = tr
@@ -631,6 +632,8 @@ class FloatingWindow(QWidget):
         self._topmost_enabled = True
         self._allow_close = False
         self._drag_offset: QPoint | None = None
+        self._metric_cards: dict[str, FloatingMetricCard] = {}
+        self._last_metrics: list[RenderedMetric] = []
         self._build_ui()
         self._apply_window_flags(initial=True)
 
@@ -675,18 +678,18 @@ class FloatingWindow(QWidget):
 
         shell_layout.addWidget(header)
 
-        self.key_card = FloatingMetricCard(_tr("剩余配额"), shell)
-        self.credits_card = FloatingMetricCard(_tr("账户余额"), shell)
-        shell_layout.addWidget(self.key_card)
-        shell_layout.addWidget(self.credits_card)
+        self.metrics_container = QWidget(shell)
+        self.metrics_layout = QVBoxLayout(self.metrics_container)
+        self.metrics_layout.setContentsMargins(0, 0, 0, 0)
+        self.metrics_layout.setSpacing(2)
+        shell_layout.addWidget(self.metrics_container)
         root.addWidget(shell)
         self._refresh_topmost_button()
 
     def retranslate_ui(self) -> None:
         self.refresh_button.setText(_tr("刷新"))
         self.full_window_button.setText(_tr("主窗口"))
-        self.key_card.set_title(_tr("剩余配额"))
-        self.credits_card.set_title(_tr("账户余额"))
+        self.update_metrics(self._last_metrics)
         self._refresh_topmost_button()
 
     def _toggle_topmost(self) -> None:
@@ -713,15 +716,28 @@ class FloatingWindow(QWidget):
         self._refresh_topmost_button()
         self._apply_window_flags(initial=True)
 
-    def update_metrics(
-        self,
-        key_value: str,
-        key_time: str,
-        credits_value: str,
-        credits_time: str,
-    ) -> None:
-        self.key_card.set_content(key_value, key_time)
-        self.credits_card.set_content(credits_value, credits_time)
+    def update_metrics(self, metrics: list[RenderedMetric]) -> None:
+        self._last_metrics = list(metrics)
+        active_ids = {metric.id for metric in metrics}
+        for metric_id, card in list(self._metric_cards.items()):
+            if metric_id not in active_ids:
+                self.metrics_layout.removeWidget(card)
+                card.deleteLater()
+                del self._metric_cards[metric_id]
+
+        for index, metric in enumerate(metrics):
+            card = self._metric_cards.get(metric.id)
+            if card is None:
+                card = FloatingMetricCard(_tr(metric.label), self.metrics_container)
+                self._metric_cards[metric.id] = card
+            card.set_title(_tr(metric.label))
+            card.set_content(metric.value, metric.refreshed_at)
+            if self.metrics_layout.indexOf(card) != index:
+                self.metrics_layout.insertWidget(index, card)
+
+        height = 52 + max(1, len(metrics)) * 34
+        self.setMinimumSize(280, height)
+        self.resize(max(self.width(), 280), height)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._allow_close:

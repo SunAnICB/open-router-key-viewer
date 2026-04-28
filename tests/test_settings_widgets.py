@@ -5,8 +5,10 @@ from open_router_key_viewer.ui.pages.settings_widgets import (
     InputSettingRow,
     PropertyRowsPanel,
     SwitchSettingRow,
+    TargetMetricDisplayConfigPanel,
 )
 from open_router_key_viewer.ui.widgets import StatusBadge
+from open_router_key_viewer.state import AppConfig
 
 
 def test_switch_setting_row_sync_and_callback(qapp) -> None:
@@ -61,6 +63,35 @@ def test_auto_query_setting_row_sync_and_save(qapp) -> None:
     assert startup == [False]
     assert polling == [True]
     assert intervals == ["600"]
+
+
+def test_metric_display_panel_order_is_independent_from_enabled_targets(qapp) -> None:
+    _ = qapp
+    changes: list[tuple[list[str], list[str]]] = []
+    panel = TargetMetricDisplayConfigPanel(
+        "panel",
+        lambda selected, order, _labels, _interval: changes.append((selected, order)),
+        lambda: None,
+    )
+
+    panel.sync_config(
+        AppConfig.from_raw(
+            {
+                "floating_metrics": ["key_remaining"],
+                "panel_metrics": ["credits_remaining", "key_usage_daily"],
+                "floating_metric_order": ["key_remaining", "credits_remaining", "key_usage_daily"],
+                "panel_metric_order": ["credits_remaining", "key_remaining", "key_usage_daily"],
+            }
+        )
+    )
+
+    assert panel.rows_layout.itemAt(0).widget().definition.id == "credits_remaining"
+    assert panel.rows_layout.itemAt(1).widget().definition.id == "key_remaining"
+
+    panel._move("key_usage_daily", -1)
+
+    assert changes[-1][0] == ["credits_remaining", "key_usage_daily"]
+    assert changes[-1][1][:3] == ["credits_remaining", "key_usage_daily", "key_remaining"]
 
 
 def test_property_rows_panel_replaces_existing_rows(qapp) -> None:

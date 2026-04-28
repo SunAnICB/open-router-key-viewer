@@ -244,7 +244,7 @@ class AppInstaller:
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n\n"
             f'APP="{binary_path}"\n'
-            'nohup "$APP" "$@" >/dev/null 2>/dev/null </dev/null &\n'
+            'PYINSTALLER_RESET_ENVIRONMENT=1 nohup "$APP" "$@" >/dev/null 2>/dev/null </dev/null &\n'
         )
 
     @staticmethod

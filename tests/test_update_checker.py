@@ -59,4 +59,7 @@ def test_replacement_script_uses_custom_relaunch_command_without_logs(tmp_path: 
 
     assert "apply-update.log" not in script
     assert "relaunch.log" not in script
-    assert "nohup '/home/test/.local/bin/open-router-key-viewer' >/dev/null 2>/dev/null </dev/null &" in script
+    assert (
+        "PYINSTALLER_RESET_ENVIRONMENT=1 nohup '/home/test/.local/bin/open-router-key-viewer' "
+        ">/dev/null 2>/dev/null </dev/null &"
+    ) in script

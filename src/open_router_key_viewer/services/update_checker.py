@@ -316,7 +316,7 @@ done
 chmod +x "$DOWNLOADED"
 mv "$DOWNLOADED" "$TARGET"
 chmod +x "$TARGET"
-nohup {relaunch_command} >/dev/null 2>/dev/null </dev/null &
+PYINSTALLER_RESET_ENVIRONMENT=1 nohup {relaunch_command} >/dev/null 2>/dev/null </dev/null &
 exit 0
 """
 

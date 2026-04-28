@@ -31,7 +31,7 @@ def test_install_to_creates_binary_launcher_and_desktop(monkeypatch: pytest.Monk
     assert (info.install_root / APP_BINARY_NAME).read_bytes() == b"binary"
     launcher_text = installer.launcher_path.read_text(encoding="utf-8")
     assert f'APP="{info.install_root / APP_BINARY_NAME}"' in launcher_text
-    assert 'nohup "$APP" "$@" >/dev/null 2>/dev/null </dev/null &' in launcher_text
+    assert 'PYINSTALLER_RESET_ENVIRONMENT=1 nohup "$APP" "$@" >/dev/null 2>/dev/null </dev/null &' in launcher_text
     desktop_text = installer.desktop_path.read_text(encoding="utf-8")
     assert "OpenRouter Key Viewer" in desktop_text
     assert str(installer.launcher_path) in desktop_text

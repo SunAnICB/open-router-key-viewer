@@ -15,14 +15,17 @@ class BuildInfo:
 
 
 def get_build_info() -> BuildInfo:
+    commit_sha = BUILD_COMMIT.strip()
+    if commit_sha and commit_sha != "unknown":
+        return BuildInfo(commit_sha=commit_sha, dirty=bool(BUILD_DIRTY), source="embedded")
+
     repo_root = _detect_repo_root()
     if repo_root is not None:
         git_info = _read_git_info(repo_root)
         if git_info is not None:
             return git_info
 
-    commit_sha = BUILD_COMMIT if BUILD_COMMIT.strip() else "unknown"
-    return BuildInfo(commit_sha=commit_sha, dirty=bool(BUILD_DIRTY), source="embedded")
+    return BuildInfo(commit_sha="unknown", dirty=bool(BUILD_DIRTY), source="embedded")
 
 
 def _detect_repo_root() -> Path | None:

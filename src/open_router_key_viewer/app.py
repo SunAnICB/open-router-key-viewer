@@ -132,6 +132,7 @@ class MainWindow(FluentWindow):
             self,
             shell_coordinator=context.shell_coordinator,
             refresh_floating_metrics=self.refresh_floating_metrics,
+            configure_floating_metrics=self._open_floating_metric_settings,
             quit_application=self.quit_application,
         )
 
@@ -289,6 +290,9 @@ class MainWindow(FluentWindow):
 
     def _show_floating_window(self) -> None:
         self.shell_controller.show_floating_window()
+
+    def _open_floating_metric_settings(self) -> None:
+        self.cache_page.open_floating_metric_settings()
 
     def present_window(self) -> None:
         self.shell_controller.show_full_window()

@@ -662,6 +662,9 @@ class CachePage(QWidget):
         self.refresh_view()
         self.on_runtime_settings_changed()
 
+    def open_floating_metric_settings(self) -> None:
+        self._open_metric_dialog("floating")
+
     def _reset_metric_display_config(self, target: str) -> None:
         panel = self._metric_panels.get(target)
         if panel is not None:

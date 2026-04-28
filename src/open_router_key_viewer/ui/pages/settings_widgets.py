@@ -210,6 +210,8 @@ class TargetMetricDisplayConfigPanel(QWidget):
         controls.addWidget(self.interval_input)
         controls.addStretch(1)
         self.reset_button = PushButton(_tr("恢复默认"), self)
+        self.reset_button.setAutoDefault(False)
+        self.reset_button.setDefault(False)
         self.reset_button.clicked.connect(self._on_reset)
         controls.addWidget(self.reset_button)
         layout.addLayout(controls)

@@ -623,6 +623,7 @@ class FloatingMetricCard(ElevatedCardWidget):
 
 class FloatingWindow(QWidget):
     refresh_requested = Signal()
+    configure_requested = Signal()
     full_window_requested = Signal()
     topmost_changed = Signal(bool)
     closed = Signal()
@@ -663,6 +664,13 @@ class FloatingWindow(QWidget):
         self.refresh_button.clicked.connect(self.refresh_requested.emit)
         header_layout.addWidget(self.refresh_button)
 
+        self.configure_button = TransparentToolButton(header)
+        self.configure_button.setFixedSize(30, 30)
+        self.configure_button.setIcon(FluentIcon.SETTING)
+        self.configure_button.setToolTip(_tr("配置显示指标"))
+        self.configure_button.clicked.connect(self.configure_requested.emit)
+        header_layout.addWidget(self.configure_button)
+
         self.topmost_button = TransparentToolButton(header)
         self.topmost_button.setFixedSize(30, 30)
         self.topmost_button.clicked.connect(self._toggle_topmost)
@@ -689,6 +697,7 @@ class FloatingWindow(QWidget):
     def retranslate_ui(self) -> None:
         self.refresh_button.setText(_tr("刷新"))
         self.full_window_button.setText(_tr("主窗口"))
+        self.configure_button.setToolTip(_tr("配置显示指标"))
         self.update_metrics(self._last_metrics)
         self._refresh_topmost_button()
 

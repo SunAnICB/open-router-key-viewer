@@ -94,6 +94,14 @@ def test_metric_display_panel_order_is_independent_from_enabled_targets(qapp) ->
     assert changes[-1][1][:3] == ["credits_remaining", "key_usage_daily", "key_remaining"]
 
 
+def test_metric_display_panel_reset_button_is_not_dialog_default(qapp) -> None:
+    _ = qapp
+    panel = TargetMetricDisplayConfigPanel("floating", lambda *_args: None, lambda: None)
+
+    assert panel.reset_button.autoDefault() is False
+    assert panel.reset_button.isDefault() is False
+
+
 def test_property_rows_panel_replaces_existing_rows(qapp) -> None:
     _ = qapp
     panel = PropertyRowsPanel()

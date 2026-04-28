@@ -35,11 +35,13 @@ class WindowShellController:
         *,
         shell_coordinator: ShellCoordinator,
         refresh_floating_metrics: Callable[[], None],
+        configure_floating_metrics: Callable[[], None],
         quit_application: Callable[[], None],
     ) -> None:
         self.host = host
         self._shell_coordinator = shell_coordinator
         self._refresh_floating_metrics_callback = refresh_floating_metrics
+        self._configure_floating_metrics_callback = configure_floating_metrics
         self._quit_application_callback = quit_application
         self._floating_window_supported = self._is_x11_platform()
         self._indicator_available = self._check_indicator_available()
@@ -256,6 +258,7 @@ class WindowShellController:
         window = FloatingWindow()
         window.set_topmost(topmost)
         window.refresh_requested.connect(self._refresh_floating_metrics_callback)
+        window.configure_requested.connect(self._configure_floating_metrics_callback)
         window.full_window_requested.connect(self.show_full_window)
         window.topmost_changed.connect(self._schedule_floating_window_rebuild)
         window.closed.connect(self.show_full_window)

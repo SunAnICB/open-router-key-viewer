@@ -234,6 +234,8 @@ class BaseQueryPage(QWidget):
     def _handle_success(self, summary: dict[str, object]) -> None:
         if self.on_query_success:
             self.on_query_success(self.mode, summary)
+        if not self._should_show_query_feedback():
+            return
         InfoBar.success(
             title=_tr("请求成功"),
             content=_tr("OpenRouter 返回了查询结果"),
@@ -245,10 +247,16 @@ class BaseQueryPage(QWidget):
         )
 
     def _handle_failure(self, message: str) -> None:
+        if not self._should_show_query_feedback():
+            return
         self._show_error(message)
 
     def _handle_finished(self) -> None:
         self._set_busy(False, self.status_badge.title_label.text())
+
+    def _should_show_query_feedback(self) -> bool:
+        window = self.window()
+        return bool(window is not None and window.isVisible())
 
     def _show_error(self, message: str) -> None:
         show_error_bar(self.window(), _tr("请求失败"), message)

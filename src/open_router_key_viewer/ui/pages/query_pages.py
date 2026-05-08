@@ -62,6 +62,9 @@ class BaseQueryPage(QWidget):
         self._result_mode = "summary"
         self._raw_http_text = ""
         self._rendered_raw_http_text = ""
+        self._defer_render_when_hidden = False
+        self._render_dirty = False
+        self._pending_raw_http_text: str | None = None
         self.query_coordinator = QueryCoordinator(
             self.mode,
             self.query_state,
@@ -138,6 +141,9 @@ class BaseQueryPage(QWidget):
 
     def _set_busy(self, busy: bool, message: str) -> None:
         _ = message
+        if self._should_defer_render():
+            self._mark_render_dirty()
+            return
         self.input_card.set_busy(busy)
         self.result_card.set_busy(busy)
 
@@ -229,7 +235,9 @@ class BaseQueryPage(QWidget):
 
     def _handle_query_started(self) -> None:
         self._set_busy(True, _tr("查询中..."))
-        self._render_query_state(raw_http_text=build_loading_raw_http_text())
+        self._render_query_state(
+            raw_http_text=build_loading_raw_http_text() if not self._should_defer_render() else None
+        )
 
     def _handle_success(self, summary: dict[str, object]) -> None:
         if self.on_query_success:
@@ -255,8 +263,14 @@ class BaseQueryPage(QWidget):
         self._set_busy(False, self.status_badge.title_label.text())
 
     def _should_show_query_feedback(self) -> bool:
+        return self._is_window_visible()
+
+    def _is_window_visible(self) -> bool:
         window = self.window()
         return bool(window is not None and window.isVisible())
+
+    def _should_defer_render(self) -> bool:
+        return self._defer_render_when_hidden and not self._is_window_visible()
 
     def _show_error(self, message: str) -> None:
         show_error_bar(self.window(), _tr("请求失败"), message)
@@ -268,8 +282,13 @@ class BaseQueryPage(QWidget):
             self._sync_raw_http_text()
 
     def _render_query_state(self, raw_http_text: str | None = None) -> None:
+        if self._should_defer_render():
+            self._mark_render_dirty(raw_http_text)
+            return
         view_model = build_query_page_render_model(self.mode, self.query_state)
         self._apply_query_render_model(view_model, raw_http_text=raw_http_text)
+        self._render_dirty = False
+        self._pending_raw_http_text = None
 
     def _apply_query_render_model(self, view_model: QueryPageRenderModel, *, raw_http_text: str | None = None) -> None:
         self.status_badge.set_status(view_model.status, _tr(view_model.status_message))
@@ -289,6 +308,24 @@ class BaseQueryPage(QWidget):
             return
         self.result_output.setPlainText(self._raw_http_text)
         self._rendered_raw_http_text = self._raw_http_text
+
+    def _mark_render_dirty(self, raw_http_text: str | None = None) -> None:
+        self._render_dirty = True
+        self._pending_raw_http_text = raw_http_text
+
+    def set_background_render_deferred(self, deferred: bool) -> None:
+        self._defer_render_when_hidden = deferred
+
+    def has_pending_render(self) -> bool:
+        return self._render_dirty
+
+    def flush_pending_render(self) -> None:
+        if not self._render_dirty:
+            return
+        raw_http_text = self._pending_raw_http_text
+        self._render_dirty = False
+        self._pending_raw_http_text = None
+        self._render_query_state(raw_http_text=raw_http_text)
 
     def retranslate_ui(self) -> None:
         self.title_label.setText(_tr(self.page_title))

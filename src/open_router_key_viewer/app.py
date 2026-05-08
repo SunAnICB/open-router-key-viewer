@@ -29,6 +29,7 @@ from open_router_key_viewer.core.bootstrap import (
 from open_router_key_viewer.core.progress_runner import ProgressRunner
 from open_router_key_viewer.i18n import tr
 from open_router_key_viewer.state import (
+    BACKGROUND_RESTORE_STEPS,
     LANGUAGE_SWITCH_STEPS,
     MAIN_WINDOW_STEPS,
     STARTUP_STEPS,
@@ -133,6 +134,7 @@ class MainWindow(FluentWindow):
             shell_coordinator=context.shell_coordinator,
             refresh_floating_metrics=self.refresh_floating_metrics,
             configure_floating_metrics=self._open_floating_metric_settings,
+            present_full_window=self.present_window,
             quit_application=self.quit_application,
         )
 
@@ -289,15 +291,35 @@ class MainWindow(FluentWindow):
         self.credits_page.run_query_if_possible()
 
     def _show_floating_window(self) -> None:
+        self._set_background_render_deferred(True)
         self.shell_controller.show_floating_window()
 
     def _open_floating_metric_settings(self) -> None:
         self.cache_page.open_floating_metric_settings()
 
     def present_window(self) -> None:
+        self._set_background_render_deferred(False)
         self.shell_controller.show_full_window()
+        self._restore_pending_background_renders()
         restored_state = (self.windowState() & ~Qt.WindowState.WindowMinimized) | Qt.WindowState.WindowActive
         self.setWindowState(restored_state)
+
+    def _set_background_render_deferred(self, deferred: bool) -> None:
+        self.key_info_page.set_background_render_deferred(deferred)
+        self.credits_page.set_background_render_deferred(deferred)
+
+    def _restore_pending_background_renders(self) -> None:
+        if not self.key_info_page.has_pending_render() and not self.credits_page.has_pending_render():
+            return
+        self._run_ui_progress_plan(
+            BACKGROUND_RESTORE_STEPS,
+            {
+                "key_page": self.key_info_page.flush_pending_render,
+                "credits_page": self.credits_page.flush_pending_render,
+                "shell": self.shell_controller.retranslate_ui,
+                "done": lambda: None,
+            },
+        )
 
     def quit_application(self) -> None:
         self._shutting_down = True
@@ -313,6 +335,7 @@ class MainWindow(FluentWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.kernel.should_hide_to_background(self._shutting_down):
+            self._set_background_render_deferred(True)
             event.ignore()
             return
         self.kernel.shutdown()

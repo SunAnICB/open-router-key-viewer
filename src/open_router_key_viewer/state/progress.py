@@ -62,6 +62,13 @@ THEME_SWITCH_STEPS: tuple[ProgressStep, ...] = (
     ProgressStep("done", 100, "主题切换完成", "准备刷新界面"),
 )
 
+BACKGROUND_RESTORE_STEPS: tuple[ProgressStep, ...] = (
+    ProgressStep("key_page", 35, "正在恢复界面...", "刷新 Key 配额页面"),
+    ProgressStep("credits_page", 65, "正在恢复界面...", "刷新账户余额页面"),
+    ProgressStep("shell", 90, "正在恢复界面...", "刷新窗口附属组件"),
+    ProgressStep("done", 100, "界面恢复完成", "准备显示主窗口"),
+)
+
 
 def step_by_id(steps: tuple[ProgressStep, ...], step_id: str) -> ProgressStep:
     for step in steps:

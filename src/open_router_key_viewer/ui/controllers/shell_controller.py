@@ -36,12 +36,14 @@ class WindowShellController:
         shell_coordinator: ShellCoordinator,
         refresh_floating_metrics: Callable[[], None],
         configure_floating_metrics: Callable[[], None],
+        present_full_window: Callable[[], None],
         quit_application: Callable[[], None],
     ) -> None:
         self.host = host
         self._shell_coordinator = shell_coordinator
         self._refresh_floating_metrics_callback = refresh_floating_metrics
         self._configure_floating_metrics_callback = configure_floating_metrics
+        self._present_full_window_callback = present_full_window
         self._quit_application_callback = quit_application
         self._floating_window_supported = self._is_x11_platform()
         self._indicator_available = self._check_indicator_available()
@@ -65,9 +67,9 @@ class WindowShellController:
     def setup_indicator(self) -> None:
         if self._indicator_available and self._shell_coordinator.panel_indicator_enabled():
             sni = SNITray(
-                activate=self.show_full_window,
+                activate=self._present_full_window_callback,
                 refresh=self._refresh_floating_metrics_callback,
-                show_window=self.show_full_window,
+                show_window=self._present_full_window_callback,
                 quit=self._quit_application_callback,
             )
             if sni.register():
@@ -84,9 +86,9 @@ class WindowShellController:
         if self._sni_tray is None or not self._sni_tray.is_active:
             if want_enabled:
                 sni = SNITray(
-                    activate=self.show_full_window,
+                    activate=self._present_full_window_callback,
                     refresh=self._refresh_floating_metrics_callback,
-                    show_window=self.show_full_window,
+                    show_window=self._present_full_window_callback,
                     quit=self._quit_application_callback,
                 )
                 if sni.register():
@@ -259,9 +261,9 @@ class WindowShellController:
         window.set_topmost(topmost)
         window.refresh_requested.connect(self._refresh_floating_metrics_callback)
         window.configure_requested.connect(self._configure_floating_metrics_callback)
-        window.full_window_requested.connect(self.show_full_window)
+        window.full_window_requested.connect(self._present_full_window_callback)
         window.topmost_changed.connect(self._schedule_floating_window_rebuild)
-        window.closed.connect(self.show_full_window)
+        window.closed.connect(self._present_full_window_callback)
         return window
 
     def _schedule_floating_window_rebuild(self, topmost: bool) -> None:
@@ -359,7 +361,7 @@ class WindowShellController:
         tray_icon.setToolTip(APP_DISPLAY_NAME)
         menu = QMenu(self.host)
         open_action = menu.addAction(_tr("显示主窗口"))
-        open_action.triggered.connect(self.show_full_window)
+        open_action.triggered.connect(self._present_full_window_callback)
         refresh_action = menu.addAction(_tr("刷新"))
         refresh_action.triggered.connect(self._refresh_floating_metrics_callback)
         menu.addSeparator()
@@ -375,7 +377,7 @@ class WindowShellController:
             QSystemTrayIcon.ActivationReason.Trigger,
             QSystemTrayIcon.ActivationReason.DoubleClick,
         ):
-            self.show_full_window()
+            self._present_full_window_callback()
 
     def _load_app_icon(self) -> QIcon:
         base_dir = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3]))

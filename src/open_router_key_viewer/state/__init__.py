@@ -28,6 +28,7 @@ from open_router_key_viewer.state.query_view_model import (
     normalize_query_error,
 )
 from open_router_key_viewer.state.progress import (
+    BACKGROUND_RESTORE_STEPS,
     LANGUAGE_SWITCH_STEPS,
     MAIN_WINDOW_STEPS,
     STARTUP_STEPS,
@@ -47,6 +48,7 @@ __all__ = [
     "QueryState",
     "ProgressState",
     "ProgressStep",
+    "BACKGROUND_RESTORE_STEPS",
     "LANGUAGE_SWITCH_STEPS",
     "MAIN_WINDOW_STEPS",
     "STARTUP_STEPS",

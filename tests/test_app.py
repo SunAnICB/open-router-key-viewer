@@ -3,6 +3,27 @@ from __future__ import annotations
 from open_router_key_viewer.state import AppConfig
 
 
+class _FloatingWindowHost:
+    def __init__(self) -> None:
+        self.deferred_values: list[bool] = []
+        self.show_floating_calls = 0
+
+    def _set_background_render_deferred(self, deferred: bool) -> None:
+        self.deferred_values.append(deferred)
+
+    def _show_floating_window(self) -> None:
+        from open_router_key_viewer.app import MainWindow
+
+        MainWindow._show_floating_window(self)
+
+    @property
+    def shell_controller(self):
+        return self
+
+    def show_floating_window(self) -> None:
+        self.show_floating_calls += 1
+
+
 def test_app_config_accepts_valid_interval_values() -> None:
     config = AppConfig.from_raw({"poll_key_info_interval_seconds": "120", "poll_credits_interval_seconds": 45})
 
@@ -46,3 +67,12 @@ def test_app_config_normalizes_metric_display_config() -> None:
     assert config.metric_labels["key_usage_daily"]["floating"] == "今日"
     assert config.metric_labels["key_usage_daily"]["panel"] == "今日"
     assert config.panel_rotation_interval_seconds == 60
+
+
+def test_opening_floating_window_defers_hidden_page_rendering() -> None:
+    host = _FloatingWindowHost()
+
+    host._show_floating_window()
+
+    assert host.deferred_values == [True]
+    assert host.show_floating_calls == 1
